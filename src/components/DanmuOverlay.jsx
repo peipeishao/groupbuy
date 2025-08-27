@@ -13,7 +13,7 @@ export default function DanmuOverlay() {
       // 過 duration 秒後清掉這筆彈幕
       setTimeout(() => {
         setDanmus((prev) => prev.filter((d) => d.id !== payload.id));
-      }, (payload.duration || 8) * 1000);
+      }, (payload.duration || 20) * 1000);
     }
 
     window.addEventListener("gb_danmu", handler);
@@ -39,7 +39,7 @@ export default function DanmuOverlay() {
           className={`danmu-item ${d.type === "order" ? "danmu-order" : "danmu-chat"}`}
           style={{
             top: d.top,
-            animationDuration: (d.duration || 8) + "s",
+            animationDuration: (d.duration || 20) + "s",
           }}
         >
           {d.text}
