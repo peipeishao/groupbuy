@@ -1,0 +1,29 @@
+@keyframes danmu-move {
+  from {
+    transform: translateX(100%); /* 從螢幕最右邊開始 */
+  }
+  to {
+    transform: translateX(-100%); /* 跑到螢幕最左邊消失 */
+  }
+}
+
+.danmu-item {
+  position: absolute;
+  right: 0;
+  white-space: nowrap;
+  font-size: 18px;
+  text-shadow: 1px 1px 2px black;
+  animation-name: danmu-move;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+.danmu-chat {
+  color: #00ffea;
+}
+
+.danmu-order {
+  color: #ff4d4f;
+  font-weight: bold;
+}
+
