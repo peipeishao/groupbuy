@@ -4,7 +4,7 @@ import OrdersList from "./components/OrdersList.jsx";
 import ChatBox from "./components/ChatBox.jsx";
 import DanmuOverlay from "./components/DanmuOverlay.jsx";
 import AdminPanel from "./components/AdminPanel.jsx"; // 引入新的 AdminPanel 元件
-import { db } from "./firebase.js"; // 這樣就能拿到 db, auth
+import { db } from "./firebase.js"; // 這樣就能拿到 db,
 import { ref, push } from "firebase/database"; // push 函式用於新增資料
 
 // 自訂 hook，用於管理彈幕

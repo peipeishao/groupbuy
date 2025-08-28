@@ -1,18 +1,7 @@
 // src/components/OrderForm.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { initializeApp } from "firebase/app";
-import { getDatabase, ref, push, onValue } from "firebase/database";
-
-// Check for the global Firebase config variable provided by the environment
-// If not available, use a placeholder to prevent errors.
-const firebaseConfig = typeof __firebase_config !== "undefined"
-  ? JSON.parse(__firebase_config)
-  : {};
-
-// Initialize Firebase only once
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
-
+import { db } from "../firebase.js"; // 從 firebase.js 拿到已初始化的 db
+import { ref, push, onValue } from "firebase/database";
 export default function OrderForm({ DEADLINE }) {
   const [products, setProducts] = useState([]); // 從 Firebase 動態載入的商品清單
   const [orders, setOrders] = useState([]);
@@ -129,55 +118,59 @@ export default function OrderForm({ DEADLINE }) {
 
   return (
     <div className="card">
-      <h2>商品列表 & 下單（左：平價，右：奢華）</h2>
-      <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginTop:12}}>
-        {/* 左 column (平價) */}
-        <div className="product-list">
-          <h3>平價雞胸肉 - 金豐盛 (100g/包)</h3>
-          {leftProducts.map(p => (
-            <div key={p.id} className="product">
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div>
-                  <div style={{fontWeight:700}}>{p.name}</div>
-                  <div style={{fontSize:12,color:"#64748b"}}>原價 {p.original} / 折扣價 {formatCurrency(p.price)}</div>
-                </div>
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:12}}>已訂：{orderedCount[p.id] || 0}</div>
-                  <div style={{fontSize:12}}>剩餘：{remaining[p.id]}</div>
-                </div>
-              </div>
-              <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                <button className="small-btn" onClick={() => changeQty(p.id, -1)} disabled={(quantities[p.id] || 0) <= 0}>-</button>
-                <input className="input" style={{width:80,textAlign:"center"}} type="number" value={quantities[p.id] || ""} onChange={e => setQty(p.id, e.target.value)} />
-                <button className="small-btn" onClick={() => changeQty(p.id, 1)} disabled={(quantities[p.id] || 0) >= remaining[p.id]}>+</button>
-              </div>
-            </div>
-          ))}
+      {/* 左 column (平價) */}
+<div className="product-list">
+  <h3>平價雞胸肉 - 金豐盛 (100g/包)</h3>
+  {leftProducts.map(p => (
+    <div key={p.id} className="product">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{display:"flex", gap:8, alignItems:"center"}}>
+          {/* 顯示商品圖片 */}
+          {p.imageUrl && <img src={p.imageUrl} alt={p.name} style={{width:150, height:150, objectFit:"cover", borderRadius: 8}} />}
+          <div>
+            <div style={{fontWeight:700}}>{p.name}</div>
+            <div style={{fontSize:12,color:"#64748b"}}>原價 {p.original} / 折扣價 {formatCurrency(p.price)}</div>
+          </div>
         </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:12}}>已訂：{orderedCount[p.id] || 0}</div>
+          <div style={{fontSize:12}}>剩餘：{remaining[p.id]}</div>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:8,alignItems:"center", marginTop:4}}>
+        <button className="small-btn" onClick={() => changeQty(p.id, -1)} disabled={(quantities[p.id] || 0) <= 0}>-</button>
+        <input className="input" style={{width:80,textAlign:"center"}} type="number" value={quantities[p.id] || ""} onChange={e => setQty(p.id, e.target.value)} />
+        <button className="small-btn" onClick={() => changeQty(p.id, 1)} disabled={(quantities[p.id] || 0) >= remaining[p.id]}>+</button>
+      </div>
+    </div>
+  ))}
+</div>
 
-        {/* Right column (奢華) */}
-        <div className="product-list">
-          <h3>奢華雞胸肉 - 台畜 (160g/包)</h3>
-          {rightProducts.map(p => (
-            <div key={p.id} className="product">
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div>
-                  <div style={{fontWeight:700}}>{p.name}</div>
-                  <div style={{fontSize:12,color:"#64748b"}}>價格 {formatCurrency(p.price)}</div>
-                </div>
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:12}}>已訂：{orderedCount[p.id] || 0}</div>
-                  <div style={{fontSize:12}}>剩餘：{remaining[p.id]}</div>
-                </div>
-              </div>
-              <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                <button className="small-btn" onClick={() => changeQty(p.id, -1)} disabled={(quantities[p.id] || 0) <= 0}>-</button>
-                <input className="input" style={{width:80,textAlign:"center"}} type="number" value={quantities[p.id] || ""} onChange={e => setQty(p.id, e.target.value)} />
-                <button className="small-btn" onClick={() => changeQty(p.id, 1)} disabled={(quantities[p.id] || 0) >= remaining[p.id]}>+</button>
-              </div>
-            </div>
-          ))}
+       {/* 右 column (奢華) 同樣加上圖片 */}
+<div className="product-list">
+  <h3>奢華雞胸肉 - 台畜 (160g/包)</h3>
+  {rightProducts.map(p => (
+    <div key={p.id} className="product">
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{display:"flex", gap:8, alignItems:"center"}}>
+          {p.imageUrl && <img src={p.imageUrl} alt={p.name} style={{width:50, height:50, objectFit:"cover"}} />}
+          <div>
+            <div style={{fontWeight:700}}>{p.name}</div>
+            <div style={{fontSize:12,color:"#64748b"}}>價格 {formatCurrency(p.price)}</div>
+          </div>
         </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:12}}>已訂：{orderedCount[p.id] || 0}</div>
+          <div style={{fontSize:12}}>剩餘：{remaining[p.id]}</div>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:8,alignItems:"center", marginTop:4}}>
+        <button className="small-btn" onClick={() => changeQty(p.id, -1)} disabled={(quantities[p.id] || 0) <= 0}>-</button>
+        <input className="input" style={{width:80,textAlign:"center"}} type="number" value={quantities[p.id] || ""} onChange={e => setQty(p.id, e.target.value)} />
+        <button className="small-btn" onClick={() => changeQty(p.id, 1)} disabled={(quantities[p.id] || 0) >= remaining[p.id]}>+</button>
+      </div>
+    </div>
+  ))}
       </div>
 
       {/* 下方表單 */}

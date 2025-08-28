@@ -1,16 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { initializeApp } from "firebase/app";
-import { getDatabase, ref, push, onValue, update, remove } from "firebase/database";
-
-// Check for the global Firebase config variable provided by the environment
-// If not available, use a placeholder to prevent errors.
-const firebaseConfig = typeof __firebase_config !== "undefined"
-  ? JSON.parse(__firebase_config)
-  : {};
-
-// Initialize Firebase only once
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
+import { db } from "../firebase.js"; // <-- 只引用
+import { ref, push, onValue, update, remove } from "firebase/database";
 
 export default function AdminPanel() {
   const [products, setProducts] = useState([]);
