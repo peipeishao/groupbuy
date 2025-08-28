@@ -153,7 +153,7 @@ export default function OrderForm({ DEADLINE }) {
     <div key={p.id} className="product">
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div style={{display:"flex", gap:8, alignItems:"center"}}>
-          {p.imageUrl && <img src={p.imageUrl} alt={p.name} style={{width:50, height:50, objectFit:"cover"}} />}
+          {p.imageUrl && <img src={p.imageUrl} alt={p.name} style={{width:150, height:150, objectFit:"cover"}} />}
           <div>
             <div style={{fontWeight:700}}>{p.name}</div>
             <div style={{fontSize:12,color:"#64748b"}}>價格 {formatCurrency(p.price)}</div>
