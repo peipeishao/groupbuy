@@ -48,9 +48,11 @@ export default function OrderSheetModal({ onClose, stallId = "bakery" }) {
   };
 
   return (
-    <div style={{
-      position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", zIndex: 40,
-      display: "grid", placeItems: "center"
+    <div 
+      id="order-modal-root" 
+      style={{
+       position: "fixed", inset: 0, background: "rgba(0,0,0,.3)", zIndex: 40,
+       display: "grid", placeItems: "center"
     }}>
       <div style={{
         width: 900, background: "#fff", borderRadius: 16, border: "1px solid #eee",

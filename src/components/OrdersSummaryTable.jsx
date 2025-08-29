@@ -3,21 +3,32 @@ import React, { useEffect, useMemo, useState } from "react";
 import { db } from "../firebase.js";
 import { onValue, ref, update } from "firebase/database";
 
-// 小工具：把 orders 轉成「每人每品項小計」
+// 將 orders 彙總成「每人每品項小計」
 function aggregate(orders) {
-  const rows = {};     // rows[name] = { name, items:{itemName: qty}, totalQty, totalMoney, paid }
+  const rowsByName = {}; // name -> { name, items: {itemKey: qty}, totalQty, totalMoney, paid }
   Object.values(orders || {}).forEach((o) => {
     const name = o.name || "未知";
-    const item = o.itemName || o.itemId;
+    const itemKey = o.itemName || o.itemId || "未命名品項";
+    const qty = Number(o.qty || 0);
     const money = Number(o.total || 0);
-    if (!rows[name]) rows[name] = { name, items: {}, totalQty: 0, totalMoney: 0, paid: false, anyIds: [] };
-    rows[name].items[item] = (rows[name].items[item] || 0) + Number(o.qty || 0);
-    rows[name].totalQty += Number(o.qty || 0);
-    rows[name].totalMoney += money;
-    rows[name].paid = rows[name].paid || !!o.paid;
-    rows[name].anyIds.push(o.id || ""); // optional
+    const paid = !!o.paid;
+
+    if (!rowsByName[name]) {
+      rowsByName[name] = {
+        name,
+        items: {},
+        totalQty: 0,
+        totalMoney: 0,
+        paid: false,
+      };
+    }
+    rowsByName[name].items[itemKey] = (rowsByName[name].items[itemKey] || 0) + qty;
+    rowsByName[name].totalQty += qty;
+    rowsByName[name].totalMoney += money;
+    // 只要其中一筆已付款，就視為該人已付款
+    rowsByName[name].paid = rowsByName[name].paid || paid;
   });
-  return Object.values(rows);
+  return Object.values(rowsByName);
 }
 
 export default function OrdersSummaryTable() {
@@ -25,41 +36,63 @@ export default function OrdersSummaryTable() {
 
   useEffect(() => {
     const off = onValue(ref(db, "orders"), (snap) => {
-      // 把 key 帶回去（之後若要就地更新 paid 可用）
       const val = snap.val() || {};
-      const withIds = Object.fromEntries(Object.entries(val).map(([k, v]) => [k, { ...v, id: k }]));
+      // 帶回 id 方便後續更新 paid
+      const withIds = Object.fromEntries(
+        Object.entries(val).map(([k, v]) => [k, { ...v, id: k }])
+      );
       setOrders(withIds);
     });
     return () => off();
   }, []);
 
   const rows = useMemo(() => aggregate(orders), [orders]);
+
+  // 取得「所有出現過的品項」當作欄位
   const allItems = useMemo(() => {
-    const set = new Set();
-    Object.values(orders).forEach((o) => set.add(o.itemName || o.itemId));
-    return Array.from(set);
+    const s = new Set();
+    Object.values(orders).forEach((o) => s.add(o.itemName || o.itemId || "未命名品項"));
+    return Array.from(s);
   }, [orders]);
 
+  // 切換某位使用者的付款狀態：把屬於他的所有訂單 paid 同步更新
   const togglePaid = async (name, toPaid) => {
-    // 把屬於此 name 的訂單全部打勾/取消
     const updates = {};
     Object.entries(orders).forEach(([id, o]) => {
-      if ((o.name || "未知") === name) updates[`orders/${id}/paid`] = !!toPaid;
+      if ((o.name || "未知") === name) {
+        updates[`orders/${id}/paid`] = !!toPaid;
+      }
     });
-    await update(ref(db), updates);
+    if (Object.keys(updates).length) {
+      await update(ref(db), updates);
+    }
   };
 
+  // 合計工具
+  const sumQtyForItem = (itemKey) =>
+    rows.reduce((s, r) => s + (r.items[itemKey] || 0), 0);
+  const grandQty = rows.reduce((s, r) => s + r.totalQty, 0);
+  const grandMoney = rows.reduce((s, r) => s + r.totalMoney, 0);
+
   return (
-    <div style={{
-      background: "rgba(255,255,255,.95)", border: "1px solid #f0d9b5", borderRadius: 12,
-      maxWidth: 1000, overflowX: "auto", boxShadow: "0 8px 24px rgba(0,0,0,.15)"
-    }}>
+    <div
+      style={{
+        background: "rgba(255,255,255,.95)",
+        border: "1px solid #f0d9b5",
+        borderRadius: 12,
+        maxWidth: 1000,
+        overflowX: "auto",
+        boxShadow: "0 8px 24px rgba(0,0,0,.15)",
+      }}
+    >
       <table style={{ borderCollapse: "collapse", minWidth: 800 }}>
         <thead>
           <tr style={{ background: "#fff2d9" }}>
             <th style={{ padding: 8 }}>姓名</th>
-            {allItems.map((i) => (
-              <th key={i} style={{ padding: 8 }}>{i}</th>
+            {allItems.map((itemKey) => (
+              <th key={`head-${itemKey}`} style={{ padding: 8 }}>
+                {itemKey}
+              </th>
             ))}
             <th style={{ padding: 8 }}>總數</th>
             <th style={{ padding: 8 }}>金額</th>
@@ -68,13 +101,19 @@ export default function OrdersSummaryTable() {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.name} style={{ borderTop: "1px solid #f2f2f2" }}>
+            <tr key={`row-${r.name}`} style={{ borderTop: "1px solid #f2f2f2" }}>
               <td style={{ padding: 8, fontWeight: 600 }}>{r.name}</td>
-              {allItems.map((i) => (
-                <td key={i} style={{ padding: 8 }} align="center">{r.items[i] || ""}</td>
+              {allItems.map((itemKey) => (
+                <td key={`cell-${r.name}-${itemKey}`} style={{ padding: 8 }} align="center">
+                  {r.items[itemKey] || ""}
+                </td>
               ))}
-              <td style={{ padding: 8 }} align="center">{r.totalQty}</td>
-              <td style={{ padding: 8 }} align="right">{r.totalMoney}</td>
+              <td style={{ padding: 8 }} align="center">
+                {r.totalQty}
+              </td>
+              <td style={{ padding: 8 }} align="right">
+                {r.totalMoney}
+              </td>
               <td style={{ padding: 8 }} align="center">
                 <input
                   type="checkbox"
@@ -84,18 +123,26 @@ export default function OrdersSummaryTable() {
               </td>
             </tr>
           ))}
+
           {/* 合計列 */}
-          <tr style={{ borderTop: "2px solid #e8d6b6", background: "#fffaf0", fontWeight: 700 }}>
+          <tr
+            style={{
+              borderTop: "2px solid #e8d6b6",
+              background: "#fffaf0",
+              fontWeight: 700,
+            }}
+          >
             <td style={{ padding: 8 }}>合計</td>
-            {allItems.map((i) => {
-              const sum = rows.reduce((s, r) => s + (r.items[i] || 0), 0);
-              return <td key={i} style={{ padding: 8 }} align="center">{sum || ""}</td>;
-            })}
+            {allItems.map((itemKey) => (
+              <td key={`sum-${itemKey}`} style={{ padding: 8 }} align="center">
+                {sumQtyForItem(itemKey) || ""}
+              </td>
+            ))}
             <td style={{ padding: 8 }} align="center">
-              {rows.reduce((s, r) => s + r.totalQty, 0)}
+              {grandQty}
             </td>
             <td style={{ padding: 8 }} align="right">
-              {rows.reduce((s, r) => s + r.totalMoney, 0)}
+              {grandMoney}
             </td>
             <td />
           </tr>
