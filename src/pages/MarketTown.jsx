@@ -1,96 +1,134 @@
-// src/pages/MarketTown.jsx（只示範新增/修改的部分）
-import React, { useEffect, useRef, useState } from "react";
+// src/pages/MarketTown.jsx
+import React, { useRef, useState, useEffect } from "react";
 import Town from "./Town.jsx";
-import Building from "../components/Building.jsx";
-import OrderSheetModal from "../components/OrderSheetModal.jsx";
 import OrdersSummaryTable from "../components/OrdersSummaryTable.jsx";
+import OrderSheetModal from "../components/OrderSheetModal.jsx";
+import CartModal from "../components/CartModal.jsx";
 import ChatBox from "../components/ChatBox.jsx";
+import HUD from "../components/HUD.jsx";
 
 export default function MarketTown() {
-  const [openSheet, setOpenSheet] = useState(false);
-  const [chatOpen, setChatOpen]   = useState(false);
-  const bannerRef   = useRef(null);
-  const buildingRef = useRef(null);
-  const tableRef    = useRef(null);
+  // 商品選單彈窗：null | "chicken" | "canele"
+  const [openSheet, setOpenSheet] = useState(null);
+  // 購物袋
+  const [cartOpen, setCartOpen] = useState(false);
+  const [cart, setCart] = useState([]); // [{id,name,price,qty,stallId}]
 
-  const [obstacles, setObstacles] = useState([]);
+  // 供中央表格滾動容器使用
+  const tableWrapRef = useRef(null);
+  useEffect(() => {
+    const el = tableWrapRef.current;
+    if (!el) return;
+    const h = Math.max(260, window.innerHeight * 0.45);
+    el.style.maxHeight = `${h}px`;
+  }, []);
 
-  const measure = () => {
-    const rects = [];
-    const asRect = (el, pad=8) => {
-      if (!el) return null;
-      const r = el.getBoundingClientRect();
-      return { x: r.left, y: r.top, w: r.width, h: r.height, pad };
-    };
-    const modalEl = document.getElementById("order-modal-root"); // 從彈窗抓
-    const b1 = asRect(bannerRef.current, 4);
-    const b2 = asRect(buildingRef.current, 12);
-    const b3 = asRect(tableRef.current, 8);
-    const b4 = modalEl ? asRect(modalEl, 8) : null;
-    [b1,b2,b3,b4].forEach(r => r && rects.push(r));
-    setObstacles(rects);
+  // 加入購物袋（合併數量）
+  const addToCart = (item) => {
+    setCart((list) => {
+      const i = list.findIndex((x) => x.id === item.id && x.stallId === item.stallId);
+      if (i >= 0) {
+        const n = [...list];
+        n[i] = { ...n[i], qty: n[i].qty + item.qty };
+        return n;
+      }
+      return [...list, item];
+    });
   };
+  const clearCart = () => setCart([]);
 
-  useEffect(() => {
-    measure();
-    const onResize = () => measure();
-    window.addEventListener("resize", onResize);
-    // 由於彈窗開關/表格位置改變都會影響，放入依賴
-    return () => window.removeEventListener("resize", onResize);
-  }, [openSheet, chatOpen]);
-
-  // 小技巧：下一個 animation frame 再量一次，確保 DOM 位置穩定
-  useEffect(() => {
-    const id = requestAnimationFrame(measure);
-    return () => cancelAnimationFrame(id);
-  });
-
+  // ====== 背景容器（relative，標題用 absolute 定位） ======
   return (
-    <div style={{ minHeight: "100vh", background: "#f7ebce" }}>
-      {/* 標題（障礙） */}
-      <div ref={bannerRef} style={{ textAlign: "center", paddingTop: 12, color: "#c00", fontWeight: 800 }}>
-        今天的G胸肉對決！
+    <div
+      style={{
+        minHeight: "100vh",
+        position: "relative",
+        backgroundImage: "url(/bg-town.jpg)", // 換成你的背景圖
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }}
+    >
+      {/* 這三個標題：絕對定位，可自行調整 top/left */}
+      <div style={{
+        position: "absolute", left: 120, top: 40,
+        color: "white", fontWeight: 900, fontSize: 42, textShadow: "0 2px 10px rgba(0,0,0,.4)"
+      }}>
+        許願池
       </div>
 
-      {/* 建築（障礙，點擊開清單） */}
-      <div ref={buildingRef} style={{ display: "flex", justifyContent: "center", marginTop: 12 }}>
-        <Building title="" onOpen={() => setOpenSheet(true)} />
-      </div>
+      <button
+        onClick={() => setOpenSheet("chicken")}
+        style={{
+          position: "absolute", left: 460, top: 70, // ← 想改位置就改這兩個數字
+          transform: "translateX(-50%)",
+          color: "#7b4f2b", fontWeight: 900, fontSize: 28,
+          background: "rgba(255,236,200,.85)", padding: "6px 12px", borderRadius: 10,
+          border: "1px solid #e1c8a2", cursor: "pointer"
+        }}
+      >
+        🐔 雞胸肉
+      </button>
 
-      {/* 表格（障礙） */}
-      <div ref={tableRef} style={{ display: "flex", justifyContent: "center", marginTop: 20 }}>
-        <OrdersSummaryTable />
-      </div>
+      <button
+        onClick={() => setOpenSheet("canele")}
+        style={{
+          position: "absolute", left: 810, top: 70, // ← 這裡也可自由調整
+          transform: "translateX(-50%)",
+          color: "#7b4f2b", fontWeight: 900, fontSize: 28,
+          background: "rgba(255,236,200,.85)", padding: "6px 12px", borderRadius: 10,
+          border: "1px solid #e1c8a2", cursor: "pointer"
+        }}
+      >
+        🥐 C文可麗露
+      </button>
 
-      {/* 聊天室浮窗 */}
-      {!chatOpen && (
-        <button
-          onClick={() => setChatOpen(true)}
-          style={{
-            position: "fixed", right: 16, bottom: 16, width: 56, height: 56, borderRadius: "50%",
-            background: "#ffcc66", border: "none", boxShadow: "0 6px 16px rgba(0,0,0,.2)", fontSize: 24, zIndex: 50
-          }}
-        >💬</button>
-      )}
-      {chatOpen && (
-        <div style={{
-          position: "fixed", right: 16, bottom: 16, width: 340, height: 420,
-          background: "#fff", border: "1px solid #eee", borderRadius: 14, overflow: "hidden",
-          boxShadow: "0 10px 22px rgba(0,0,0,.18)", zIndex: 50
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", padding: 8, borderBottom: "1px solid #eee" }}>
-            <strong>聊天室</strong>
-            <button onClick={() => setChatOpen(false)}>✕</button>
-          </div>
-          <ChatBox />
+      {/* 中央彙總表（固定位置＋獨立卷軸） */}
+      <div
+        style={{
+          position: "absolute", left: "50%", top: "55%",
+          transform: "translate(-50%, -50%)",
+          width: 1050, background: "rgba(255,255,255,.92)", borderRadius: 16,
+          border: "1px solid #eedbbd", boxShadow: "0 12px 26px rgba(0,0,0,.2)", padding: 12
+        }}
+      >
+        <div ref={tableWrapRef} style={{ overflow: "auto", borderRadius: 12 }}>
+          <OrdersSummaryTable />
         </div>
+      </div>
+
+      {/* 左下：聊天室（常駐） */}
+      <div style={{
+        position: "fixed", left: 18, bottom: 18, width: 420, height: 240,
+        background: "rgba(255,255,255,.92)", border: "1px solid #eee", borderRadius: 16,
+        overflow: "hidden", boxShadow: "0 8px 18px rgba(0,0,0,.18)", zIndex: 50,
+        display: "flex", flexDirection: "column"
+      }}>
+        <ChatBox />
+      </div>
+
+      {/* 多人移動層 */}
+      <Town />
+
+      {/* 底部 HUD（購物袋按鈕會打開 CartModal） */}
+      <HUD onOpenCart={() => setCartOpen(true)} />
+
+      {/* 商品清單彈窗（只負責加入購物袋） */}
+      {openSheet && (
+        <OrderSheetModal
+          stallId={openSheet}
+          onClose={() => setOpenSheet(null)}
+          onAdd={addToCart}
+        />
       )}
 
-      {/* 角色渲染（整個視窗），把障礙傳進去 */}
-      <Town obstacles={obstacles} margin={24} />
-
-      {/* 訂單面板（彈窗本身也當障礙，用 id 量測） */}
-      {openSheet && <OrderSheetModal onClose={() => setOpenSheet(false)} stallId="bakery" />}
+      {/* 購物袋彈窗（顯示 + 送單） */}
+      {cartOpen && (
+        <CartModal
+          cart={cart}
+          onClose={() => setCartOpen(false)}
+          onClear={clearCart}
+        />
+      )}
     </div>
   );
 }

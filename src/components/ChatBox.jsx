@@ -1,45 +1,64 @@
 // src/components/ChatBox.jsx
-import React, { useEffect, useState } from "react";
-import { ref, push, onValue } from "firebase/database";
-import { db } from "../firebase";
-import { useDanmu } from "./danmuHook";
+import React, { useEffect, useRef, useState } from "react";
+import { db } from "../firebase.js";
+import { onValue, push, ref, serverTimestamp } from "firebase/database";
+import { usePlayer } from "../store/playerContext.jsx";
 
-export default function ChatBox(){
+export default function ChatBox() {
+  const { uid, profile, setBubble } = usePlayer();
   const [msgs, setMsgs] = useState([]);
-  const [text, setText] = useState("");
-  const addDanmu = useDanmu();
+  const [text, setText] = useState("");   // ✅ 用 text / setText
+  const listRef = useRef(null);
 
-  useEffect(()=>{
-    const chatRef = ref(db, "chat");
-    return onValue(chatRef, snap=>{
-      const val = snap.val() || {};
-      const arr = Object.entries(val).map(([id, d])=>({ id, ...d }));
-      arr.sort((a,b)=> a.createdAt - b.createdAt);
+  // 訂閱訊息
+  useEffect(() => {
+    const off = onValue(ref(db, "chat/global"), (snap) => {
+      const v = snap.val() || {};
+      const arr = Object.entries(v)
+        .map(([id, m]) => ({ id, ...m }))
+        .sort((a, b) => (a.ts?.seconds || 0) - (b.ts?.seconds || 0));
       setMsgs(arr);
+      requestAnimationFrame(() => {
+        listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+      });
     });
+    return () => off();
   }, []);
 
-  async function handleSend(){
-    if(!text.trim()) return;
-    const payload = { name: "訪客", text: text.trim(), createdAt: Date.now() };
-    await push(ref(db, "chat"), payload);
-    addDanmu(`${payload.name}: ${payload.text}`, "chat");
-    setText("");
-  }
+  const send = async () => {
+    const t = text.trim();   // ✅ 用 text
+    if (!t) return;
+    await push(ref(db, "chat/global"), {
+      uid,
+      name: profile.name || "旅人",
+      text: t,
+      ts: serverTimestamp(),
+    });
+    await setBubble(t);
+    setText("");   // ✅ 清空輸入框
+  };
 
   return (
-    <div className="card">
-      <h3>即時聊天</h3>
-      <div style={{maxHeight:160, overflowY:"auto", border:"1px solid #eef2f7", padding:8, borderRadius:8, marginTop:8}}>
-        {msgs.map(m=> <div key={m.id} style={{marginBottom:6}}><strong>{m.name}:</strong> {m.text}</div>)}
-        {msgs.length===0 && <div style={{color:"#64748b"}}>尚無訊息</div>}
+    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+      <div ref={listRef} style={{ flex: 1, overflowY: "auto", padding: 8 }}>
+        {msgs.map((m) => (
+          <div key={m.id} style={{ marginBottom: 6 }}>
+            <b>{m.name || "旅人"}：</b> {m.text}
+          </div>
+        ))}
       </div>
-
-      <div style={{display:"flex", gap:8, marginTop:8}}>
-        <input className="input" placeholder="輸入訊息" value={text} onChange={e=>setText(e.target.value)} onKeyDown={e=> e.key==="Enter" && handleSend()} />
-        <button className="button" onClick={handleSend}>送出</button>
+      <div style={{ display: "flex", borderTop: "1px solid #eee" }}>
+        <input
+          value={text}                    // ✅ 一定要是 text
+          onChange={(e) => setText(e.target.value)}  // ✅ setText
+          onKeyDown={(e) => e.key === "Enter" && send()}
+          placeholder="輸入訊息…"
+          style={{ flex: 1, border: "none", padding: 10 }}
+        />
+        <button onClick={send} style={{ padding: "10px 14px" }}>
+          送出
+        </button>
       </div>
     </div>
   );
 }
-
