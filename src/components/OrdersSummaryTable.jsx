@@ -1,130 +1,117 @@
 // src/components/OrdersSummaryTable.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { db } from "../firebase.js";
-import { onValue, ref, update } from "firebase/database";
+import { onValue, ref, update, serverTimestamp } from "firebase/database";
 
-// 將 orders 彙總成「每人每品項小計」
-function aggregate(orders) {
-  const rowsByName = {}; // name -> { name, items: {itemKey: qty}, totalQty, totalMoney, paid }
-  Object.values(orders || {}).forEach((o) => {
-    const name = o.name || "未知";
-    const itemKey = o.itemName || o.itemId || "未命名品項";
-    const qty = Number(o.qty || 0);
-    const money = Number(o.total || 0);
-    const paid = !!o.paid;
+const AVATAR_EMOJI = { bunny: "🐰", bear: "🐻", cat: "🐱", duck: "🦆" };
 
-    if (!rowsByName[name]) {
-      rowsByName[name] = {
-        name,
-        items: {},
-        totalQty: 0,
-        totalMoney: 0,
-        paid: false,
-      };
+function aggregateByItem(ordersArr) {
+  const map = new Map(); // key: stallId|id
+  for (const o of ordersArr) {
+    for (const it of o.items || []) {
+      const key = `${it.stallId}|${it.id}`;
+      const prev = map.get(key) || { stallId: it.stallId, id: it.id, name: it.name, totalQty: 0, totalAmount: 0 };
+      const qty = Number(it.qty) || 0;
+      const price = Number(it.price) || 0;
+      prev.totalQty += qty;
+      prev.totalAmount += qty * price;
+      map.set(key, prev);
     }
-    rowsByName[name].items[itemKey] = (rowsByName[name].items[itemKey] || 0) + qty;
-    rowsByName[name].totalQty += qty;
-    rowsByName[name].totalMoney += money;
-    // 只要其中一筆已付款，就視為該人已付款
-    rowsByName[name].paid = rowsByName[name].paid || paid;
-  });
-  return Object.values(rowsByName);
+  }
+  return Array.from(map.values()).sort(
+    (a, b) => a.stallId.localeCompare(b.stallId) || a.name.localeCompare(b.name, "zh-Hant")
+  );
 }
 
 export default function OrdersSummaryTable() {
-  const [orders, setOrders] = useState({});
+  const [orders, setOrders] = useState([]);
 
   useEffect(() => {
     const off = onValue(ref(db, "orders"), (snap) => {
-      const val = snap.val() || {};
-      // 帶回 id 方便後續更新 paid
-      const withIds = Object.fromEntries(
-        Object.entries(val).map(([k, v]) => [k, { ...v, id: k }])
-      );
-      setOrders(withIds);
+      const v = snap.val() || {};
+      const list = Object.entries(v).map(([id, o]) => ({
+        id,
+        ...o,
+      }));
+      // 依建立時間排序（serverTimestamp → 毫秒）
+      list.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      setOrders(list);
     });
     return () => off();
   }, []);
 
-  const rows = useMemo(() => aggregate(orders), [orders]);
+  const totals = useMemo(() => aggregateByItem(orders), [orders]);
 
-  // 取得「所有出現過的品項」當作欄位
-  const allItems = useMemo(() => {
-    const s = new Set();
-    Object.values(orders).forEach((o) => s.add(o.itemName || o.itemId || "未命名品項"));
-    return Array.from(s);
-  }, [orders]);
-
-  // 切換某位使用者的付款狀態：把屬於他的所有訂單 paid 同步更新
-  const togglePaid = async (name, toPaid) => {
-    const updates = {};
-    Object.entries(orders).forEach(([id, o]) => {
-      if ((o.name || "未知") === name) {
-        updates[`orders/${id}/paid`] = !!toPaid;
-      }
+  const markPaid = async (orderId, nextPaid) => {
+    await update(ref(db, `orders/${orderId}`), {
+      paid: nextPaid,
+      paidAt: nextPaid ? serverTimestamp() : null,
+      status: nextPaid ? "paid" : "submitted",
     });
-    if (Object.keys(updates).length) {
-      await update(ref(db), updates);
-    }
   };
 
-  // 合計工具
-  const sumQtyForItem = (itemKey) =>
-    rows.reduce((s, r) => s + (r.items[itemKey] || 0), 0);
-  const grandQty = rows.reduce((s, r) => s + r.totalQty, 0);
-  const grandMoney = rows.reduce((s, r) => s + r.totalMoney, 0);
+  const grandTotal = useMemo(
+    () => orders.reduce((s, o) => s + (Number(o.total) || 0), 0),
+    [orders]
+  );
 
   return (
-    <div
-      style={{
-        background: "rgba(255,255,255,.95)",
-        border: "1px solid #f0d9b5",
-        borderRadius: 12,
-        maxWidth: 1000,
-        overflowX: "auto",
-        boxShadow: "0 8px 24px rgba(0,0,0,.15)",
-      }}
-    >
-      <table style={{ borderCollapse: "collapse", minWidth: 800 }}>
+    <div style={{ background: "#fff", padding: 12, borderRadius: 12, width: 980 }}>
+      {/* 訂單列表 */}
+      <h3 style={{ marginTop: 0 }}>訂單列表</h3>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ background: "#fff2d9" }}>
-            <th style={{ padding: 8 }}>姓名</th>
-            {allItems.map((itemKey) => (
-              <th key={`head-${itemKey}`} style={{ padding: 8 }}>
-                {itemKey}
-              </th>
-            ))}
-            <th style={{ padding: 8 }}>總數</th>
-            <th style={{ padding: 8 }}>金額</th>
-            <th style={{ padding: 8 }}>已付款</th>
+            <th style={{ textAlign: "left", padding: 8 }}>頭像</th>
+            <th style={{ textAlign: "left", padding: 8 }}>角色名稱</th>
+            <th style={{ textAlign: "left", padding: 8, width: "50%" }}>訂購清單</th>
+            <th style={{ textAlign: "right", padding: 8 }}>總金額</th>
+            <th style={{ textAlign: "center", padding: 8 }}>已付款</th>
+            <th style={{ textAlign: "center", padding: 8 }}>末五碼</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr key={`row-${r.name}`} style={{ borderTop: "1px solid #f2f2f2" }}>
-              <td style={{ padding: 8, fontWeight: 600 }}>{r.name}</td>
-              {allItems.map((itemKey) => (
-                <td key={`cell-${r.name}-${itemKey}`} style={{ padding: 8 }} align="center">
-                  {r.items[itemKey] || ""}
-                </td>
-              ))}
-              <td style={{ padding: 8 }} align="center">
-                {r.totalQty}
-              </td>
-              <td style={{ padding: 8 }} align="right">
-                {r.totalMoney}
-              </td>
-              <td style={{ padding: 8 }} align="center">
-                <input
-                  type="checkbox"
-                  checked={r.paid}
-                  onChange={(e) => togglePaid(r.name, e.target.checked)}
-                />
-              </td>
-            </tr>
-          ))}
+          {orders.map((o) => {
+            const avatarKey = o?.orderedBy?.avatar || "bunny";
+            const emoji = AVATAR_EMOJI[avatarKey] || "🙂";
+            const roleName = o?.orderedBy?.roleName || (o?.uid ? String(o.uid).slice(0,6) : "旅人");
+            const line = (o.items || [])
+              .map((it) => `${it.name}×${it.qty}`)
+              .join("、");
 
-          {/* 合計列 */}
+            return (
+              <tr key={o.id} style={{ borderTop: "1px solid #f2f2f2" }}>
+                <td style={{ padding: 8 }}>
+                  <div
+                    style={{
+                      width: 36, height: 36, borderRadius: 999,
+                      background: "#f7f7f7", display: "grid", placeItems: "center",
+                      border: "1px solid #eee"
+                    }}
+                    title={avatarKey}
+                  >
+                    <span style={{ fontSize: 20 }}>{emoji}</span>
+                  </div>
+                </td>
+                <td style={{ padding: 8, fontWeight: 600 }}>{roleName}</td>
+                <td style={{ padding: 8 }}>{line}</td>
+                <td style={{ padding: 8, textAlign: "right" }}>🪙 {o.total || 0}</td>
+                <td style={{ padding: 8, textAlign: "center" }}>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <input
+                      type="checkbox"
+                      checked={!!o.paid}
+                      onChange={(e) => markPaid(o.id, e.target.checked)}
+                    />
+                    {o.paid ? "已付款" : "未付款"}
+                  </label>
+                </td>
+                <td style={{ padding: 8, textAlign: "center" }}>{o.last5 || "-"}</td>
+              </tr>
+            );
+          })}
+
+          {/* 訂單總金額列 */}
           <tr
             style={{
               borderTop: "2px solid #e8d6b6",
@@ -132,20 +119,33 @@ export default function OrdersSummaryTable() {
               fontWeight: 700,
             }}
           >
-            <td style={{ padding: 8 }}>合計</td>
-            {allItems.map((itemKey) => (
-              <td key={`sum-${itemKey}`} style={{ padding: 8 }} align="center">
-                {sumQtyForItem(itemKey) || ""}
-              </td>
-            ))}
-            <td style={{ padding: 8 }} align="center">
-              {grandQty}
-            </td>
-            <td style={{ padding: 8 }} align="right">
-              {grandMoney}
-            </td>
-            <td />
+            <td style={{ padding: 8 }} colSpan={3}>所有訂單總金額</td>
+            <td style={{ padding: 8, textAlign: "right" }}>🪙 {grandTotal}</td>
+            <td colSpan={2} />
           </tr>
+        </tbody>
+      </table>
+
+      {/* 分攤合計（每品項匯總） */}
+      <h4 style={{ marginTop: 16 }}>分攤合計</h4>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr style={{ background: "#f6f8ff" }}>
+            <th style={{ textAlign: "left", padding: 8 }}>攤位</th>
+            <th style={{ textAlign: "left", padding: 8 }}>品項</th>
+            <th style={{ textAlign: "center", padding: 8 }}>總數</th>
+            <th style={{ textAlign: "right", padding: 8 }}>總金額</th>
+          </tr>
+        </thead>
+        <tbody>
+          {totals.map((t) => (
+            <tr key={`${t.stallId}|${t.id}`} style={{ borderTop: "1px solid #f2f2f2" }}>
+              <td style={{ padding: 8 }}>{t.stallId}</td>
+              <td style={{ padding: 8 }}>{t.name}</td>
+              <td style={{ padding: 8, textAlign: "center" }}>{t.totalQty}</td>
+              <td style={{ padding: 8, textAlign: "right" }}>🪙 {t.totalAmount}</td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>

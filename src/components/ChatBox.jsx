@@ -5,9 +5,13 @@ import { onValue, push, ref, serverTimestamp } from "firebase/database";
 import { usePlayer } from "../store/playerContext.jsx";
 
 export default function ChatBox() {
-  const { uid, profile, setBubble } = usePlayer();
+  const player = usePlayer();
+  const uid = player?.uid || "dev-local";
+  const roleName = player?.roleName || player?.profile?.name || "旅人"; // ✅ 統一顯示角色名稱
+  const setBubble = player?.setBubble;
+
   const [msgs, setMsgs] = useState([]);
-  const [text, setText] = useState("");   // ✅ 用 text / setText
+  const [text, setText] = useState("");
   const listRef = useRef(null);
 
   // 訂閱訊息
@@ -16,7 +20,8 @@ export default function ChatBox() {
       const v = snap.val() || {};
       const arr = Object.entries(v)
         .map(([id, m]) => ({ id, ...m }))
-        .sort((a, b) => (a.ts?.seconds || 0) - (b.ts?.seconds || 0));
+        // ✅ RTDB 的 serverTimestamp() 會變成「毫秒數字」，不是 Firestore 的 {seconds}
+        .sort((a, b) => (a.ts || 0) - (b.ts || 0));
       setMsgs(arr);
       requestAnimationFrame(() => {
         listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
@@ -26,16 +31,18 @@ export default function ChatBox() {
   }, []);
 
   const send = async () => {
-    const t = text.trim();   // ✅ 用 text
+    const t = text.trim();
     if (!t) return;
     await push(ref(db, "chat/global"), {
       uid,
-      name: profile.name || "旅人",
+      roleName, // ✅ 存公開名稱（不存 realName）
       text: t,
       ts: serverTimestamp(),
     });
-    await setBubble(t);
-    setText("");   // ✅ 清空輸入框
+    if (typeof setBubble === "function") {
+      await setBubble(t);
+    }
+    setText("");
   };
 
   return (
@@ -43,16 +50,16 @@ export default function ChatBox() {
       <div ref={listRef} style={{ flex: 1, overflowY: "auto", padding: 8 }}>
         {msgs.map((m) => (
           <div key={m.id} style={{ marginBottom: 6 }}>
-            <b>{m.name || "旅人"}：</b> {m.text}
+            <b>{m.roleName || "旅人"}：</b> {m.text}
           </div>
         ))}
       </div>
       <div style={{ display: "flex", borderTop: "1px solid #eee" }}>
         <input
-          value={text}                    // ✅ 一定要是 text
-          onChange={(e) => setText(e.target.value)}  // ✅ setText
+          value={text}
+          onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && send()}
-          placeholder="輸入訊息…"
+          placeholder={`以「${roleName}」身分發話…`}
           style={{ flex: 1, border: "none", padding: 10 }}
         />
         <button onClick={send} style={{ padding: "10px 14px" }}>
