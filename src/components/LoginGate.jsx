@@ -1,12 +1,10 @@
-// src/components/LoginModal.jsx
-console.log("NEW LoginModal v2 loaded");
+// src/components/LoginGate.jsx
 import React, { useMemo, useState } from "react";
 import { auth, db } from "../firebase.js";
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-} from "firebase/auth";
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
 import { ref, set, update, push, serverTimestamp, get } from "firebase/database";
+
+console.log("✅ LoginGate loaded (NEW)"); // 用來辨認是否載到新元件
 
 const AVATARS = [
   { id: "bunny", emoji: "🐰", label: "小兔" },
@@ -15,10 +13,10 @@ const AVATARS = [
   { id: "duck",  emoji: "🦆", label: "小鴨" },
 ];
 
-// ✅ 帳號允許「英文大小寫 + 數字」
+// 允許英文大小寫 + 數字
 const normUsername = (s) => (s || "").replace(/[^a-zA-Z0-9]/g, "");
 
-export default function LoginModal({ open = true, onDone }) {
+export default function LoginGate({ open = true, onDone }) {
   const [username, setUsername] = useState("");
   const [realName, setRealName] = useState("");
   const [password, setPassword] = useState("");
@@ -31,18 +29,9 @@ export default function LoginModal({ open = true, onDone }) {
   if (!open) return null;
 
   const validate = () => {
-    if (!realName.trim()) {
-      alert("請輸入真實姓名");
-      return false;
-    }
-    if (!u) {
-      alert("請輸入帳號（僅限英文或數字）");
-      return false;
-    }
-    if ((password || "").length < 6) {
-      alert("請輸入密碼（至少 6 碼）");
-      return false;
-    }
+    if (!realName.trim()) return alert("請輸入真實姓名"), false;
+    if (!u) return alert("請輸入帳號（英文或數字，可大寫小寫）"), false;
+    if ((password || "").length < 6) return alert("請輸入密碼（至少 6 碼）"), false;
     return true;
   };
 
@@ -50,9 +39,10 @@ export default function LoginModal({ open = true, onDone }) {
     if (!validate()) return;
     setLoading(true);
     try {
+      // 先嘗試登入
       await signInWithEmailAndPassword(auth, email, password);
 
-      // 登入成功 → 補寫資料
+      // 登入成功 → 補寫必要欄位
       const uid = auth.currentUser?.uid;
       if (uid) {
         const pubSnap = await get(ref(db, `playersPublic/${uid}`));
@@ -78,6 +68,7 @@ export default function LoginModal({ open = true, onDone }) {
       }
       onDone?.();
     } catch (err) {
+      // 帳號不存在 → 自動註冊
       if (err?.code === "auth/user-not-found") {
         try {
           const cred = await createUserWithEmailAndPassword(auth, email, password);
@@ -122,40 +113,19 @@ export default function LoginModal({ open = true, onDone }) {
     }
   };
 
+  // UI（左右兩欄 + 下方一顆按鈕）
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,.28)",
-        display: "grid",
-        placeItems: "center",
-        zIndex: 200,
-        padding: 12,
-      }}
-    >
+    <div role="dialog" aria-modal="true" style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,.28)",
+      display: "grid", placeItems: "center", zIndex: 200, padding: 12,
+    }}>
       <div style={{ width: "min(960px, 96vw)" }}>
-        <h2
-          style={{
-            textAlign: "center",
-            marginTop: 0,
-            marginBottom: 12,
-            fontWeight: 800,
-          }}
-        >
-          建立你的角色
+        <h2 style={{ textAlign: "center", marginTop: 0, marginBottom: 12, fontWeight: 800 }}>
+          建立你的角色（LoginGate）
         </h2>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 16,
-          }}
-        >
-          {/* 左側輸入欄位 */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          {/* 左：真實姓名 / 帳號 / 密碼 */}
           <div className="card" style={{ background: "#fff", padding: 16, borderRadius: 16 }}>
             <label>真實姓名</label>
             <input
@@ -165,7 +135,7 @@ export default function LoginModal({ open = true, onDone }) {
               style={{ width: "100%", marginBottom: 8 }}
             />
 
-            <label>帳號（英數，可大寫小寫）</label>
+            <label>帳號（英文或數字，可大寫小寫）</label>
             <input
               value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -176,7 +146,7 @@ export default function LoginModal({ open = true, onDone }) {
               將使用：<strong>{u || "your_id"}</strong>@groupbuy.local
             </div>
 
-            <label>密碼（至少 6 碼，可大寫小寫）</label>
+            <label>密碼（至少 6 碼）</label>
             <input
               type="password"
               value={password}
@@ -186,23 +156,16 @@ export default function LoginModal({ open = true, onDone }) {
             />
           </div>
 
-          {/* 右側頭像選擇 */}
+          {/* 右：頭像選擇 */}
           <div className="card" style={{ background: "#fff", padding: 16, borderRadius: 16 }}>
             <div style={{ marginBottom: 8, fontWeight: 600 }}>選擇頭像</div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(4,1fr)",
-                gap: 10,
-              }}
-            >
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
               {AVATARS.map((a) => (
                 <button
                   key={a.id}
                   onClick={() => setAvatar(a.id)}
                   style={{
-                    padding: 12,
-                    borderRadius: 14,
+                    padding: 12, borderRadius: 14,
                     border: avatar === a.id ? "2px solid #ec4899" : "1px solid #e5e7eb",
                     background: "#fff",
                   }}
@@ -216,7 +179,7 @@ export default function LoginModal({ open = true, onDone }) {
           </div>
         </div>
 
-        {/* 下方按鈕 */}
+        {/* 下：進入小鎮 */}
         <div style={{ display: "grid", placeItems: "center", marginTop: 16 }}>
           <button
             onClick={enterTown}
@@ -237,4 +200,3 @@ export default function LoginModal({ open = true, onDone }) {
     </div>
   );
 }
-

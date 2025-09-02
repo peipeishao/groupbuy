@@ -1,193 +1,298 @@
 // src/components/OrderForm.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { db } from "../firebase.js"; // 從 firebase.js 拿到已初始化的 db
-import { ref, push, onValue } from "firebase/database";
-export default function OrderForm({ DEADLINE }) {
-  const [products, setProducts] = useState([]); // 從 Firebase 動態載入的商品清單
-  const [orders, setOrders] = useState([]);
-  const [quantities, setQuantities] = useState({});
-  const [name, setName] = useState("");
+import { ref, onValue, push, serverTimestamp } from "firebase/database";
+import { db } from "../firebase.js";
+import { usePlayer } from "../store/playerContext.jsx";
+
+/**
+ * 使用方式：
+ * <OrderForm stallId="chicken" DEADLINE="2025-12-31T23:59:00+08:00" />
+ * - stallId：從 /stalls/{stallId}/items 載入商品；若無資料，用內建 fallback。
+ * - DEADLINE（可選）：截止時間（ISO 字串）。超過時間會禁止送單。
+ */
+
+const FALLBACK_BY_STALL = {
+  chicken: [
+    { id: "c1", name: "舒肥雞胸（原味）", price: 50, stock: 999, img: "" },
+    { id: "c2", name: "舒肥雞胸（檸檬）", price: 55, stock: 999, img: "" },
+  ],
+  cannele: [
+    { id: "k1", name: "可麗露（原味）", price: 70, stock: 999, img: "" },
+    { id: "k2", name: "可麗露（抹茶）", price: 80, stock: 999, img: "" },
+  ],
+};
+
+export default function OrderForm({ stallId = "chicken", DEADLINE }) {
+  const { uid, profile } = usePlayer();
+
+  const [items, setItems] = useState([]);     // 可購買商品清單
+  const [qty, setQty] = useState({});         // {itemId: number}
+  const [name, setName] = useState(profile?.realName || "");
   const [contact, setContact] = useState("");
   const [note, setNote] = useState("");
-  // const addDanmu = useDanmu(); // Temporarily removed to fix the error
+  const [loading, setLoading] = useState(true);
 
-  // 1. 從 Firebase 載入商品清單
+  // 載入商品：優先 RTDB /stalls/{stallId}/items，否則用 fallback
   useEffect(() => {
-    const productsRef = ref(db, "products");
-    const unsubscribe = onValue(productsRef, (snap) => {
-      const val = snap.val() || {};
-      const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
-      setProducts(arr);
-      // 更新 quantities 狀態以反映新的商品清單
-      setQuantities(q => {
-        const newQuantities = {};
-        for(const p of arr) {
-          newQuantities[p.id] = q[p.id] || 0;
-        }
-        return newQuantities;
-      });
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // 2. 從 Firebase 即時監聽訂單
-  useEffect(()=>{
-    const ordersRef = ref(db, "orders");
-    const unsubscribe = onValue(ordersRef, (snap) => {
-      const val = snap.val() || {};
-      const arr = Object.entries(val).map(([id, data]) => ({ id, ...data }));
-      // sort by createdAt desc
-      arr.sort((a,b)=> b.createdAt - a.createdAt);
-      setOrders(arr);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // 3. 計算每項已訂購總數
-  const orderedCount = useMemo(()=>{
-    const map = Object.fromEntries(products.map(p=>[p.id,0]));
-    for(const o of orders){
-      for(const it of o.items||[]){
-        map[it.id] = (map[it.id]||0) + (it.qty||0);
+    const r = ref(db, `stalls/${stallId}/items`);
+    const off = onValue(r, (snap) => {
+      const val = snap.val();
+      if (val && typeof val === "object") {
+        const list = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
+        setItems(list.map((it) => ({
+          id: String(it.id ?? ""),
+          name: String(it.name ?? ""),
+          price: Number(it.price ?? 0),
+          img: it.img ?? "",
+          stock: Number(it.stock ?? 0),
+        })));
+      } else {
+        setItems(FALLBACK_BY_STALL[stallId] || []);
       }
-    }
-    return map;
-  }, [orders, products]);
-
-  // 4. 剩餘量
-  const stockDefault = 999;
-  const remaining = useMemo(()=>{
-    const r = {};
-    for(const p of products){
-      r[p.id] = Math.max(0, stockDefault - (orderedCount[p.id] || 0));
-    }
-    return r;
-  }, [orderedCount, products]);
-
-  // 5. 處理數量變更
-  function changeQty(id, delta){
-    setQuantities(q=> {
-      const cur = q[id] || 0;
-      const next = Math.max(0, Math.min(remaining[id], cur + delta));
-      return {...q, [id]: next};
+      setLoading(false);
+    }, () => {
+      setItems(FALLBACK_BY_STALL[stallId] || []);
+      setLoading(false);
     });
-  }
-  function setQty(id, value){
-    setQuantities(q=> ({...q, [id]: Math.max(0, Math.min(remaining[id], Math.floor(Number(value)||0)))}));
-  }
+    return () => off();
+  }, [stallId]);
 
-  // 6. 格式化價格
-  function formatCurrency(n){ return new Intl.NumberFormat("zh-TW",{style:"currency",currency:"TWD",maximumFractionDigits:0}).format(n); }
+  const withinDeadline = useMemo(() => {
+    if (!DEADLINE) return true;
+    const now = Date.now();
+    const end = Date.parse(DEADLINE);
+    return isFinite(end) ? now <= end : true;
+  }, [DEADLINE]);
 
-  // 7. 計算購物車總價
-  const cart = useMemo(()=> {
-    return products.map(p=>({...p, qty: quantities[p.id]||0})).filter(x=>x.qty>0);
-  }, [quantities, products]);
+  const selected = useMemo(() => {
+    return items
+      .map((it) => ({ ...it, qty: Number(qty[it.id]) || 0 }))
+      .filter((it) => it.qty > 0);
+  }, [items, qty]);
 
-  const total = useMemo(()=> cart.reduce((s,it)=> s + it.price * it.qty, 0), [cart]);
+  const total = useMemo(
+    () => selected.reduce((s, it) => s + it.qty * (Number(it.price) || 0), 0),
+    [selected]
+  );
 
-  // 8. 送出訂單
-  async function handleSubmit(e){
-    e?.preventDefault();
-    if(new Date() > DEADLINE) return alert("已過截止，無法下單");
-    if(!name.trim()||!contact.trim()) return alert("請填寫姓名與聯絡方式");
-    if(cart.length===0) return alert("請選擇至少一項商品");
+  const inc = (id, delta) => {
+    setQty((q) => {
+      const next = Math.max(0, (Number(q[id]) || 0) + delta);
+      return { ...q, [id]: next };
+    });
+  };
 
-    const orderObj = {
+  async function submitOrder(e) {
+    e?.preventDefault?.();
+
+    if (!uid) {
+      alert("尚未登入，請先登入再送單。");
+      return;
+    }
+    if (!withinDeadline) {
+      alert("已超過收單時間，無法送出。");
+      return;
+    }
+    if (!name.trim() || !contact.trim()) {
+      alert("請填寫『姓名』與『聯絡方式』");
+      return;
+    }
+    if (selected.length === 0 || total <= 0) {
+      alert("請選擇至少 1 個品項");
+      return;
+    }
+
+    // ✅ 將每個 item 加上 stallId，符合 OrdersSummaryTable 的聚合需求
+    const orderItems = selected.map((it) => ({
+      stallId,          // ★ 這行是關鍵：每個品項附上攤位 ID
+      id: it.id,
+      name: it.name,
+      price: Number(it.price) || 0,
+      qty: Number(it.qty) || 0,
+    }));
+
+    const payload = {
+      uid,
+      orderedBy: {
+        uid,
+        roleName: profile?.roleName || (profile?.name || "旅人"),
+        avatar: profile?.avatar || "bunny",
+      },
       name: name.trim(),
       contact: contact.trim(),
-      note: note.trim(),
-      items: cart.map(c=>({id:c.id,name:c.name,qty:c.qty,price:c.price})),
+      note: note.trim() || null,
+      items: orderItems,
       total,
-      createdAt: Date.now()
+      status: "submitted",
+      paid: false,
+      paidAt: null,
+      last5: null,
+      // 用毫秒時間，避免 serverTimestamp() 在前端成為物件造成排序困難
+      createdAt: Date.now(),
+      createdAtSrv: serverTimestamp(), // 想要後端時間可留著參考
     };
-    await push(ref(db, "orders"), orderObj);
 
-    // Temporarily removed the call to addDanmu
-    // for(const it of orderObj.items){
-    //   addDanmu(`${orderObj.name} 剛下單 ${it.name} x${it.qty}！`, "order");
-    // }
-
-    setQuantities({});
-    setName(""); setContact(""); setNote("");
+    try {
+      await push(ref(db, "orders"), payload);
+      // 清空選擇
+      setQty({});
+      alert("已送出訂單，感謝下單！");
+    } catch (err) {
+      console.error(err);
+      alert("送單失敗，請稍後再試");
+    }
   }
 
-  // 9. 渲染 UI
-  const leftProducts = products.filter(p => p.category === "平價");
-  const rightProducts = products.filter(p => p.category === "奢華");
-
   return (
-    <div className="card">
-      {/* 左 column (平價) */}
-<div className="product-list">
-  <h3>平價雞胸肉 - 金豐盛 (100g/包)</h3>
-  {leftProducts.map(p => (
-    <div key={p.id} className="product">
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div style={{display:"flex", gap:8, alignItems:"center"}}>
-          {/* 顯示商品圖片 */}
-          {p.imageUrl && <img src={p.imageUrl} alt={p.name} style={{width:150, height:150, objectFit:"cover", borderRadius: 8}} />}
-          <div>
-            <div style={{fontWeight:700}}>{p.name}</div>
-            <div style={{fontSize:12,color:"#64748b"}}>原價 {p.original} / 折扣價 {formatCurrency(p.price)}</div>
-          </div>
-        </div>
-        <div style={{textAlign:"right"}}>
-          <div style={{fontSize:12}}>已訂：{orderedCount[p.id] || 0}</div>
-          <div style={{fontSize:12}}>剩餘：{remaining[p.id]}</div>
-        </div>
-      </div>
-      <div style={{display:"flex",gap:8,alignItems:"center", marginTop:4}}>
-        <button className="small-btn" onClick={() => changeQty(p.id, -1)} disabled={(quantities[p.id] || 0) <= 0}>-</button>
-        <input className="input" style={{width:80,textAlign:"center"}} type="number" value={quantities[p.id] || ""} onChange={e => setQty(p.id, e.target.value)} />
-        <button className="small-btn" onClick={() => changeQty(p.id, 1)} disabled={(quantities[p.id] || 0) >= remaining[p.id]}>+</button>
-      </div>
-    </div>
-  ))}
-</div>
+    <form
+      onSubmit={submitOrder}
+      className="card"
+      style={{ maxWidth: 820, margin: "0 auto" }}
+    >
+      <h3 style={{ marginTop: 0 }}>
+        {stallId === "chicken" ? "🐔 雞胸肉團購" :
+         stallId === "cannele" ? "🍮 可麗露團購" : `🛒 ${stallId} 團購`}
+      </h3>
 
-       {/* 右 column (奢華) 同樣加上圖片 */}
-<div className="product-list">
-  <h3>奢華雞胸肉 - 台畜 (160g/包)</h3>
-  {rightProducts.map(p => (
-    <div key={p.id} className="product">
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div style={{display:"flex", gap:8, alignItems:"center"}}>
-          {p.imageUrl && <img src={p.imageUrl} alt={p.name} style={{width:150, height:150, objectFit:"cover"}} />}
-          <div>
-            <div style={{fontWeight:700}}>{p.name}</div>
-            <div style={{fontSize:12,color:"#64748b"}}>價格 {formatCurrency(p.price)}</div>
-          </div>
+      {/* 收單狀態 */}
+      {DEADLINE && (
+        <div style={{ marginBottom: 8 }}>
+          收單截止：<strong>{new Date(DEADLINE).toLocaleString()}</strong>{" "}
+          {withinDeadline ? (
+            <span style={{ color: "#16a34a" }}>（可下單）</span>
+          ) : (
+            <span style={{ color: "#b91c1c" }}>（已截止）</span>
+          )}
         </div>
-        <div style={{textAlign:"right"}}>
-          <div style={{fontSize:12}}>已訂：{orderedCount[p.id] || 0}</div>
-          <div style={{fontSize:12}}>剩餘：{remaining[p.id]}</div>
-        </div>
-      </div>
-      <div style={{display:"flex",gap:8,alignItems:"center", marginTop:4}}>
-        <button className="small-btn" onClick={() => changeQty(p.id, -1)} disabled={(quantities[p.id] || 0) <= 0}>-</button>
-        <input className="input" style={{width:80,textAlign:"center"}} type="number" value={quantities[p.id] || ""} onChange={e => setQty(p.id, e.target.value)} />
-        <button className="small-btn" onClick={() => changeQty(p.id, 1)} disabled={(quantities[p.id] || 0) >= remaining[p.id]}>+</button>
-      </div>
-    </div>
-  ))}
+      )}
+
+      {/* 商品清單 */}
+      <div
+        className="product-list"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+          gap: 12,
+        }}
+      >
+        {loading && <div>載入中…</div>}
+        {!loading && items.length === 0 && (
+          <div style={{ color: "#64748b" }}>目前沒有可購買的商品</div>
+        )}
+        {items.map((it) => {
+          const count = Number(qty[it.id]) || 0;
+          return (
+            <div
+              key={it.id}
+              className="card"
+              style={{ padding: 12, borderRadius: 12 }}
+            >
+              {it.img ? (
+                <img
+                  src={it.img}
+                  alt={it.name}
+                  style={{
+                    width: "100%",
+                    height: 140,
+                    objectFit: "cover",
+                    borderRadius: 10,
+                    marginBottom: 8,
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    height: 140,
+                    background: "#f1f5f9",
+                    borderRadius: 10,
+                    display: "grid",
+                    placeItems: "center",
+                    marginBottom: 8,
+                    color: "#64748b",
+                    fontSize: 12,
+                  }}
+                >
+                  無圖片
+                </div>
+              )}
+              <div style={{ fontWeight: 700 }}>{it.name}</div>
+              <div style={{ margin: "6px 0" }}>價格：🪙 {it.price}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => inc(it.id, -1)}
+                  className="small-btn"
+                >
+                  −
+                </button>
+                <div style={{ minWidth: 24, textAlign: "center" }}>{count}</div>
+                <button
+                  type="button"
+                  onClick={() => inc(it.id, +1)}
+                  className="small-btn"
+                >
+                  ＋
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
-      {/* 下方表單 */}
-      <form onSubmit={handleSubmit} style={{marginTop:12, display:"grid", gap:8}}>
-        <div style={{display:"flex", gap:8}}>
-          <input className="input" placeholder="姓名" value={name} onChange={e => setName(e.target.value)} />
-          <input className="input" placeholder="聯絡方式" value={contact} onChange={e => setContact(e.target.value)} />
+      {/* 個人資訊 */}
+      <div
+        style={{
+          marginTop: 12,
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 12,
+        }}
+      >
+        <div>
+          <label>姓名</label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="王小明"
+            style={{ width: "100%" }}
+          />
         </div>
-        <textarea className="input" placeholder="備註 (口味/過敏/取貨資訊)" value={note} onChange={e => setNote(e.target.value)} />
-        <div style={{display:"flex", justifyContent:"space-between", alignItems:"center"}}>
-          <div>總計： <strong>{formatCurrency(total)}</strong></div>
-          <div>
-            <button type="button" className="button" style={{marginRight:8}} onClick={() => { setQuantities({}); }}>清空購物車</button>
-            <button type="submit" className="button">送出訂單</button>
-          </div>
+        <div>
+          <label>聯絡方式</label>
+          <input
+            value={contact}
+            onChange={(e) => setContact(e.target.value)}
+            placeholder="電話 / Line"
+            style={{ width: "100%" }}
+          />
         </div>
-      </form>
-    </div>
+      </div>
+
+      <div style={{ marginTop: 8 }}>
+        <label>備註</label>
+        <input
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          placeholder="口味、收貨備註等…"
+          style={{ width: "100%" }}
+        />
+      </div>
+
+      {/* 合計 / 送出 */}
+      <div
+        style={{
+          marginTop: 12,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+        }}
+      >
+        <div style={{ fontWeight: 700 }}>合計：🪙 {total}</div>
+        <button type="submit" disabled={!withinDeadline || total <= 0}>
+          送出訂單
+        </button>
+      </div>
+    </form>
   );
 }

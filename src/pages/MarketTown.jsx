@@ -12,12 +12,12 @@ export default function MarketTown() {
   const [openSheet, setOpenSheet] = useState(null);
   const [cartOpen, setCartOpen] = useState(false);
 
-  // 供中央表格滾動容器使用
+  // 中央表格容器高度
   const tableWrapRef = useRef(null);
   useEffect(() => {
     const el = tableWrapRef.current;
     if (!el) return;
-    const h = Math.max(260, window.innerHeight * 0.45);
+    const h = Math.max(260, Math.floor(window.innerHeight * 0.45));
     el.style.maxHeight = `${h}px`;
   }, []);
 
@@ -26,12 +26,12 @@ export default function MarketTown() {
       style={{
         minHeight: "100vh",
         position: "relative",
-        backgroundImage: "url(/bg-town.jpg)", // 換成你的背景圖
+        backgroundImage: "url(/bg-town.jpg)",
         backgroundSize: "cover",
         backgroundPosition: "center",
       }}
     >
-      {/* 標題示意（可刪） */}
+      {/* 示意標題 */}
       <div
         style={{
           position: "absolute",
@@ -42,43 +42,47 @@ export default function MarketTown() {
           fontSize: 42,
           textShadow: "0 2px 10px rgba(0,0,0,.4)",
           zIndex: 5,
+          userSelect: "none",
+          pointerEvents: "none",
         }}
       >
         許願池
       </div>
 
-      {/* === 建築圖片：點擊開啟清單 === */}
+      {/* === 建築圖片：點擊開啟攤位清單 === */}
       <img
-        src="/buildings/chicken.png"   // TODO: 換成你的實際檔名
+        src="/buildings/chicken.png"
         alt="雞胸肉攤位"
         onClick={() => setOpenSheet("chicken")}
         style={{
           position: "absolute",
-          left: 420, // ← 位置自行調整
+          left: 420,
           top: 140,
           width: 160,
           cursor: "pointer",
           userSelect: "none",
           zIndex: 10,
         }}
+        draggable={false}
       />
 
       <img
-        src="/buildings/cannele.png"   // TODO: 換成你的實際檔名
+        src="/buildings/cannele.png"
         alt="可麗露攤位"
-        onClick={() => setOpenSheet("cannele")} // ⚠️ 注意拼字：cannele（雙 n）
+        onClick={() => setOpenSheet("cannele")}
         style={{
           position: "absolute",
-          left: 760, // ← 位置自行調整
+          left: 760,
           top: 150,
           width: 160,
           cursor: "pointer",
           userSelect: "none",
           zIndex: 10,
         }}
+        draggable={false}
       />
 
-      {/* 中央彙總表（固定位置＋獨立卷軸） */}
+      {/* 中央訂單彙總表 */}
       <div
         style={{
           position: "absolute",
@@ -135,9 +139,8 @@ export default function MarketTown() {
         />
       )}
 
-      {/* 購物袋彈窗（CartModal 內部自己用 useCart） */}
+      {/* 購物袋彈窗 */}
       {cartOpen && <CartModal onClose={() => setCartOpen(false)} />}
     </div>
   );
 }
-

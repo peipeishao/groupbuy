@@ -5,21 +5,43 @@ import { onValue, ref, update, serverTimestamp } from "firebase/database";
 
 const AVATAR_EMOJI = { bunny: "🐰", bear: "🐻", cat: "🐱", duck: "🦆" };
 
+/** 將 orders[].items 正規化成陣列 */
+function normalizeItems(items) {
+  if (!items) return [];
+  if (Array.isArray(items)) return items.filter(Boolean);
+  if (typeof items === "object") {
+    return Object.values(items).filter(Boolean);
+  }
+  return [];
+}
+
+/** 安全聚合每個品項的總數 / 總金額（缺欄位不會炸） */
 function aggregateByItem(ordersArr) {
   const map = new Map(); // key: stallId|id
   for (const o of ordersArr) {
-    for (const it of o.items || []) {
-      const key = `${it.stallId}|${it.id}`;
-      const prev = map.get(key) || { stallId: it.stallId, id: it.id, name: it.name, totalQty: 0, totalAmount: 0 };
-      const qty = Number(it.qty) || 0;
-      const price = Number(it.price) || 0;
+    const items = normalizeItems(o.items);
+    for (const it of items) {
+      const stallId = (it && it.stallId) ? String(it.stallId) : "default";
+      const id = (it && it.id) ? String(it.id) : String(Math.random());
+      const name = (it && it.name) ? String(it.name) : id;
+      const qty = Number(it?.qty) || 0;
+      const price = Number(it?.price) || 0;
+
+      const key = `${stallId}|${id}`;
+      const prev =
+        map.get(key) || { stallId, id, name, totalQty: 0, totalAmount: 0 };
+
       prev.totalQty += qty;
       prev.totalAmount += qty * price;
       map.set(key, prev);
     }
   }
+
+  // 以 stallId、name 排序（皆有預設值，避免 localeCompare on undefined）
   return Array.from(map.values()).sort(
-    (a, b) => a.stallId.localeCompare(b.stallId) || a.name.localeCompare(b.name, "zh-Hant")
+    (a, b) =>
+      (a.stallId || "").localeCompare(b.stallId || "") ||
+      (a.name || "").localeCompare(b.name || "", "zh-Hant")
   );
 }
 
@@ -33,8 +55,8 @@ export default function OrdersSummaryTable() {
         id,
         ...o,
       }));
-      // 依建立時間排序（serverTimestamp → 毫秒）
-      list.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      // 依建立時間排序（serverTimestamp → 毫秒；缺值給 0）
+      list.sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0));
       setOrders(list);
     });
     return () => off();
@@ -51,7 +73,8 @@ export default function OrdersSummaryTable() {
   };
 
   const grandTotal = useMemo(
-    () => orders.reduce((s, o) => s + (Number(o.total) || 0), 0),
+    () =>
+      orders.reduce((s, o) => s + (Number(o.total) || 0), 0),
     [orders]
   );
 
@@ -74,9 +97,13 @@ export default function OrdersSummaryTable() {
           {orders.map((o) => {
             const avatarKey = o?.orderedBy?.avatar || "bunny";
             const emoji = AVATAR_EMOJI[avatarKey] || "🙂";
-            const roleName = o?.orderedBy?.roleName || (o?.uid ? String(o.uid).slice(0,6) : "旅人");
-            const line = (o.items || [])
-              .map((it) => `${it.name}×${it.qty}`)
+            const roleName =
+              o?.orderedBy?.roleName ||
+              (o?.uid ? String(o.uid).slice(0, 6) : "旅人");
+
+            // 安全組字串：items 可能不是陣列
+            const line = normalizeItems(o.items)
+              .map((it) => `${it?.name ?? "未命名"}×${Number(it?.qty) || 0}`)
               .join("、");
 
             return (
@@ -84,9 +111,13 @@ export default function OrdersSummaryTable() {
                 <td style={{ padding: 8 }}>
                   <div
                     style={{
-                      width: 36, height: 36, borderRadius: 999,
-                      background: "#f7f7f7", display: "grid", placeItems: "center",
-                      border: "1px solid #eee"
+                      width: 36,
+                      height: 36,
+                      borderRadius: 999,
+                      background: "#f7f7f7",
+                      display: "grid",
+                      placeItems: "center",
+                      border: "1px solid #eee",
                     }}
                     title={avatarKey}
                   >
@@ -94,8 +125,8 @@ export default function OrdersSummaryTable() {
                   </div>
                 </td>
                 <td style={{ padding: 8, fontWeight: 600 }}>{roleName}</td>
-                <td style={{ padding: 8 }}>{line}</td>
-                <td style={{ padding: 8, textAlign: "right" }}>🪙 {o.total || 0}</td>
+                <td style={{ padding: 8 }}>{line || "-"}</td>
+                <td style={{ padding: 8, textAlign: "right" }}>🪙 {Number(o.total) || 0}</td>
                 <td style={{ padding: 8, textAlign: "center" }}>
                   <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                     <input
@@ -106,7 +137,9 @@ export default function OrdersSummaryTable() {
                     {o.paid ? "已付款" : "未付款"}
                   </label>
                 </td>
-                <td style={{ padding: 8, textAlign: "center" }}>{o.last5 || "-"}</td>
+                <td style={{ padding: 8, textAlign: "center" }}>
+                  {o?.last5 ? String(o.last5) : "-"}
+                </td>
               </tr>
             );
           })}
@@ -119,7 +152,9 @@ export default function OrdersSummaryTable() {
               fontWeight: 700,
             }}
           >
-            <td style={{ padding: 8 }} colSpan={3}>所有訂單總金額</td>
+            <td style={{ padding: 8 }} colSpan={3}>
+              所有訂單總金額
+            </td>
             <td style={{ padding: 8, textAlign: "right" }}>🪙 {grandTotal}</td>
             <td colSpan={2} />
           </tr>
@@ -140,12 +175,19 @@ export default function OrdersSummaryTable() {
         <tbody>
           {totals.map((t) => (
             <tr key={`${t.stallId}|${t.id}`} style={{ borderTop: "1px solid #f2f2f2" }}>
-              <td style={{ padding: 8 }}>{t.stallId}</td>
-              <td style={{ padding: 8 }}>{t.name}</td>
+              <td style={{ padding: 8 }}>{t.stallId || "-"}</td>
+              <td style={{ padding: 8 }}>{t.name || "-"}</td>
               <td style={{ padding: 8, textAlign: "center" }}>{t.totalQty}</td>
               <td style={{ padding: 8, textAlign: "right" }}>🪙 {t.totalAmount}</td>
             </tr>
           ))}
+          {totals.length === 0 && (
+            <tr>
+              <td colSpan={4} style={{ padding: 12, color: "#777", textAlign: "center" }}>
+                目前沒有可彙總的品項
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
     </div>

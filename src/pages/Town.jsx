@@ -5,19 +5,18 @@ import { db } from "../firebase.js";
 import { onValue, ref } from "firebase/database";
 
 const SPEED = 4;
-const R = 20; // 角色半徑
 
 export default function Town() {
-  const { uid, profile, updatePosition, setBubble } = usePlayer();
+  const { uid, profile, updatePosition } = usePlayer();
   const [players, setPlayers] = useState({});
   const [maskReady, setMaskReady] = useState(false);
   const ctxRef = useRef(null);
   const keysRef = useRef({});
 
-  // 🔹 1. 載入遮罩
+  // 1) 載入可走遮罩
   useEffect(() => {
     const img = new Image();
-    img.src = "/walkable-mask.png"; // 放 public/ 底下
+    img.src = "/walkable-mask.png";
     img.onload = () => {
       const cvs = document.createElement("canvas");
       cvs.width = img.width;
@@ -29,43 +28,42 @@ export default function Town() {
     };
   }, []);
 
-  // 🔹 2. 判斷是否可走
   const isWalkable = (x, y) => {
     const ctx = ctxRef.current;
     if (!ctx) return true;
-    const data = ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data;
-    const [r, g, b, a] = data;
+    const d = ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data;
+    const [r, g, b, a] = d;
     const brightness = (r + g + b) / 3;
-    return brightness > 128 || a === 0; // 白或透明 = 可走
+    return brightness > 128 || a === 0;
   };
 
-  // 🔹 3. 訂閱所有玩家
+  // 2) 訂閱所有玩家（正確路徑：playersPublic）
   useEffect(() => {
-    const off = onValue(ref(db, "players"), (snap) => {
+    const off = onValue(ref(db, "playersPublic"), (snap) => {
       setPlayers(snap.val() || {});
     });
     return () => off();
   }, []);
 
-  // 🔹 4. 鍵盤事件
+  // 3) 鍵盤事件（打字時不攔截）
   useEffect(() => {
     const isTyping = () => {
       const el = document.activeElement;
       const t = el?.tagName?.toLowerCase();
       return t === "input" || t === "textarea" || el?.isContentEditable;
     };
-    const isMove = (k) =>
+    const isMoveKey = (k) =>
       ["w", "a", "s", "d", "arrowup", "arrowleft", "arrowdown", "arrowright"].includes(k);
 
     const kd = (e) => {
       const k = e.key.toLowerCase();
-      if (!isMove(k) || isTyping()) return;
+      if (!isMoveKey(k) || isTyping()) return;
       e.preventDefault();
       keysRef.current[k] = true;
     };
     const ku = (e) => {
       const k = e.key.toLowerCase();
-      if (!isMove(k) || isTyping()) return;
+      if (!isMoveKey(k) || isTyping()) return;
       keysRef.current[k] = false;
     };
     window.addEventListener("keydown", kd, { passive: false });
@@ -76,49 +74,35 @@ export default function Town() {
     };
   }, []);
 
-  // 🔹 5. 移動 loop
+  // 4) 移動 loop（同步到 playersPublic/{uid}）
   useEffect(() => {
     let raf = 0;
     const tick = () => {
-      let { x = 300, y = 300, dir = "down" } = profile;
+      let { x = 300, y = 300, dir = "down" } = profile || {};
       const k = keysRef.current;
-      let nx = x,
-        ny = y;
+      let nx = x, ny = y;
 
-      if (k.w || k.arrowup) {
-        ny -= SPEED;
-        dir = "up";
-      }
-      if (k.s || k.arrowdown) {
-        ny += SPEED;
-        dir = "down";
-      }
-      if (k.a || k.arrowleft) {
-        nx -= SPEED;
-        dir = "left";
-      }
-      if (k.d || k.arrowright) {
-        nx += SPEED;
-        dir = "right";
-      }
+      if (k.w || k.arrowup) { ny -= SPEED; dir = "up"; }
+      if (k.s || k.arrowdown) { ny += SPEED; dir = "down"; }
+      if (k.a || k.arrowleft) { nx -= SPEED; dir = "left"; }
+      if (k.d || k.arrowright) { nx += SPEED; dir = "right"; }
 
       if (maskReady) {
         if (nx !== x && isWalkable(nx, y)) x = nx;
         if (ny !== y && isWalkable(x, ny)) y = ny;
       } else {
-        x = nx;
-        y = ny;
+        x = nx; y = ny;
       }
 
-      if (x !== profile.x || y !== profile.y) updatePosition(x, y, dir);
-
+      if (x !== profile?.x || y !== profile?.y) {
+        updatePosition(x, y, dir);
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [profile, maskReady, updatePosition]);
 
-  // 🔹 6. 畫玩家
   const AVATAR_EMOJI = { bunny: "🐰", bear: "🐻", cat: "🐱", duck: "🦆" };
 
   return (
@@ -131,9 +115,10 @@ export default function Town() {
             left: (p.x ?? 300) - 20,
             top: (p.y ?? 300) - 20,
             textAlign: "center",
-            pointerEvents: "none", // 避免擋滑鼠
+            pointerEvents: "none",
           }}
         >
+          {/* 氣泡 */}
           {p.bubble?.text && (
             <div
               style={{
@@ -153,6 +138,8 @@ export default function Town() {
               {p.bubble.text}
             </div>
           )}
+
+          {/* 角色方塊 */}
           <div
             style={{
               width: 40,
@@ -168,8 +155,10 @@ export default function Town() {
               {AVATAR_EMOJI[p.avatar || "bunny"] || "🙂"}
             </div>
           </div>
+
+          {/* 名稱（公開） */}
           <div style={{ fontSize: 12, color: "#333", fontWeight: 600 }}>
-            {p.name || "旅人"}
+            {p.roleName || "旅人"}
             {id === uid ? " (你)" : ""}
           </div>
         </div>
