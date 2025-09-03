@@ -1,225 +1,135 @@
-// src/components/OrderSheetModal.jsx
 import React, { useEffect, useMemo, useState } from "react";
-import { db } from "../firebase.js";
-import { ref, onValue } from "firebase/database";
+import { db, auth } from "../firebase.js";
+import { ref, push, set, serverTimestamp } from "firebase/database";
+import { usePlayer } from "../store/playerContext.jsx";
 import { useCart } from "../store/useCart.js";
 
-/**
- * 用法：
- * <OrderSheetModal open={!!openSheet} stallId={openSheet} onClose={()=>setOpenSheet(null)} />
- *
- * 特色：
- * - 從 /stalls/{stallId}/items 載入商品；若無資料，使用 fallback。
- * - 點「加入購物袋」時，會寫入 { stallId, id, name, price, qty } 給 useCart。
- * - 單品一次加 1，重複點擊會累加數量。
- * - 有「已加入！」的微提示。
- */
+const fmt = (n) => new Intl.NumberFormat("zh-TW").format(n || 0);
 
-const FALLBACK_BY_STALL = {
-  chicken: [
-    { id: "c1", name: "舒肥雞胸（原味）", price: 50, img: "" },
-    { id: "c2", name: "舒肥雞胸（檸檬）", price: 55, img: "" },
-  ],
-  cannele: [
-    { id: "k1", name: "可麗露（原味）", price: 70, img: "" },
-    { id: "k2", name: "可麗露（抹茶）", price: 80, img: "" },
-  ],
-};
+export default function OrderSheetModal({ open, stallId, onClose }) {
+  const { isAnonymous, openLoginGate, roleName, avatar, uid } = usePlayer();
+  const { items = [], reload, clearCart } = useCart();
+  const [placing, setPlacing] = useState(false);
 
-export default function OrderSheetModal({ open, stallId = "chicken", onClose }) {
-  const { addToCart } = useCart();
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [justAdded, setJustAdded] = useState(null); // 顯示「已加入！」
+  const cartItems = useMemo(() => {
+    if (!stallId) return items;
+    return items.filter((it) => it.stallId === stallId);
+  }, [items, stallId]);
 
-  // 載入 /stalls/{stallId}/items；無資料→ fallback
-  useEffect(() => {
-    if (!open) return;
-    setLoading(true);
-    const r = ref(db, `stalls/${stallId}/items`);
-    const off = onValue(
-      r,
-      (snap) => {
-        const val = snap.val();
-        if (val && typeof val === "object") {
-          const list = Array.isArray(val) ? val.filter(Boolean) : Object.values(val);
-          setItems(
-            list.map((it) => ({
-              id: String(it.id ?? ""),
-              name: String(it.name ?? ""),
-              price: Number(it.price ?? 0),
-              img: it.img ?? "",
-            }))
-          );
-        } else {
-          setItems(FALLBACK_BY_STALL[stallId] || []);
-        }
-        setLoading(false);
-      },
-      () => {
-        setItems(FALLBACK_BY_STALL[stallId] || []);
-        setLoading(false);
+  const total = useMemo(
+    () => cartItems.reduce((s, x) => s + (Number(x.price)||0)*(Number(x.qty)||0), 0),
+    [cartItems]
+  );
+
+  // ✅ 雙保險：placeOrder 內部也檢查匿名 → 直接開登入窗，不送單
+  const placeOrder = async () => {
+    if (placing || !cartItems.length) return;
+    if (isAnonymous) {
+      openLoginGate({ mode: "upgrade", next: "checkout" });
+      return;
+    }
+    try {
+      setPlacing(true);
+      const orderRef = push(ref(db, "orders"));
+      const payload = {
+        uid,
+        orderedBy: { uid, roleName, avatar },
+        items: cartItems.map(({ stallId, id, name, price, qty }) => ({ stallId, id, name, price, qty })),
+        total,
+        status: "submitted",
+        paid: false,
+        paidAt: null,
+        last5: null,
+        createdAt: serverTimestamp(),
+      };
+      await set(orderRef, payload);
+
+      if (typeof clearCart === "function") {
+        await clearCart();
+      } else if (auth.currentUser?.uid) {
+        await set(ref(db, `carts/${auth.currentUser.uid}`), { items: {}, updatedAt: Date.now() });
       }
-    );
-    return () => off();
-  }, [open, stallId]);
 
-  const title = useMemo(() => {
-    if (stallId === "chicken") return "🐔 雞胸肉清單";
-    if (stallId === "cannele") return "🍮 可麗露清單";
-    return `🛒 ${stallId} 清單`;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stallId]);
+      await reload?.();
+      onClose?.();
+      alert("訂單已送出！");
+    } catch (err) {
+      console.error(err);
+      alert("送單失敗，請稍後再試");
+    } finally {
+      setPlacing(false);
+    }
+  };
+
+  useEffect(() => {
+    const onOk = (e) => { if (e?.detail?.next === "checkout") placeOrder(); };
+    window.addEventListener("login-success", onOk);
+    return () => window.removeEventListener("login-success", onOk);
+  }, [cartItems, total, uid, roleName, avatar, placing, isAnonymous]);
+
+  const handleCheckoutClick = () => {
+    if (isAnonymous) {
+      openLoginGate({ mode: "upgrade", next: "checkout" });
+      return;
+    }
+    placeOrder();
+  };
 
   if (!open) return null;
 
-  const handleAdd = async (it) => {
-    await addToCart({
-      stallId,      // ★ 關鍵：帶上攤位 ID
-      id: it.id,
-      name: it.name,
-      price: Number(it.price) || 0,
-      qty: 1,
-    });
-    setJustAdded(it.id);
-    setTimeout(() => setJustAdded(null), 800);
-  };
-
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,.28)",
-        zIndex: 100,
-        display: "grid",
-        placeItems: "center",
-        padding: 12,
-      }}
-      onClick={(e) => {
-        // 點背景關閉
-        if (e.target === e.currentTarget) onClose?.();
-      }}
-    >
-      <div
-        style={{
-          width: "min(960px, 92vw)",
-          maxHeight: "86vh",
-          overflow: "auto",
-          background: "#fff",
-          border: "1px solid #eee",
-          borderRadius: 16,
-          boxShadow: "0 16px 36px rgba(0,0,0,.22)",
-        }}
-      >
-        {/* 標題列 */}
-        <div
-          style={{
-            position: "sticky",
-            top: 0,
-            background: "#fff",
-            borderBottom: "1px solid #f0f0f0",
-            padding: 12,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            borderTopLeftRadius: 16,
-            borderTopRightRadius: 16,
-            zIndex: 1,
-          }}
-        >
-          <strong style={{ fontSize: 18 }}>{title}</strong>
-          <button onClick={onClose} className="small-btn">✕ 關閉</button>
+    <div role="dialog" aria-modal="true" onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.28)", display: "grid", placeItems: "center", zIndex: 160 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(880px, 96vw)", background: "#fff", borderRadius: 16, padding: 16, position: "relative" }}>
+        <button onClick={onClose} aria-label="關閉" style={{ position: "absolute", right: 8, top: 8, borderRadius: 999, width: 36, height: 36 }}>×</button>
+
+        <h3 style={{ marginTop: 4, marginBottom: 12, fontWeight: 900 }}>
+          攤位：{stallId || "全部"}　|　購物清單
+        </h3>
+
+        <div style={{ border: "1px solid #eee", borderRadius: 12, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead style={{ background: "#fafafa" }}>
+              <tr>
+                <th style={{ textAlign: "left", padding: 8 }}>品項</th>
+                <th style={{ textAlign: "right", padding: 8, width: 80 }}>單價</th>
+                <th style={{ textAlign: "right", padding: 8, width: 80 }}>數量</th>
+                <th style={{ textAlign: "right", padding: 8, width: 120 }}>小計</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cartItems.length === 0 ? (
+                <tr><td colSpan="4" style={{ padding: 12, textAlign: "center", color: "#888" }}>這個攤位目前沒有品項</td></tr>
+              ) : cartItems.map((it) => {
+                const sub = (Number(it.price)||0) * (Number(it.qty)||0);
+                return (
+                  <tr key={`${it.stallId}|${it.id}`} style={{ borderTop: "1px solid #f0f0f0" }}>
+                    <td style={{ padding: 8 }}>{it.name}</td>
+                    <td style={{ padding: 8, textAlign: "right" }}>{fmt(it.price)}</td>
+                    <td style={{ padding: 8, textAlign: "right" }}>{it.qty}</td>
+                    <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>{fmt(sub)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
 
-        {/* 清單 */}
-        <div
-          style={{
-            padding: 16,
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-            gap: 12,
-          }}
-        >
-          {loading && <div>載入中…</div>}
-          {!loading && items.length === 0 && (
-            <div style={{ color: "#64748b" }}>目前沒有可購買的商品</div>
-          )}
-
-          {items.map((it) => (
-            <div
-              key={it.id}
-              className="card"
-              style={{
-                padding: 12,
-                borderRadius: 12,
-                position: "relative",
-                border: "1px solid #eee",
-                background: "#fff",
-              }}
-            >
-              {it.img ? (
-                <img
-                  src={it.img}
-                  alt={it.name}
-                  style={{
-                    width: "100%",
-                    height: 140,
-                    objectFit: "cover",
-                    borderRadius: 10,
-                    marginBottom: 8,
-                  }}
-                />
-              ) : (
-                <div
-                  style={{
-                    height: 140,
-                    background: "#f1f5f9",
-                    borderRadius: 10,
-                    display: "grid",
-                    placeItems: "center",
-                    marginBottom: 8,
-                    color: "#64748b",
-                    fontSize: 12,
-                  }}
-                >
-                  無圖片
-                </div>
-              )}
-
-              <div style={{ fontWeight: 700 }}>{it.name}</div>
-              <div style={{ margin: "6px 0" }}>價格：🪙 {Number(it.price) || 0}</div>
-
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <button type="button" onClick={() => handleAdd(it)}>
-                  加入購物袋
-                </button>
-                {justAdded === it.id && (
-                  <span style={{ fontSize: 12, color: "#16a34a" }}>已加入！</span>
-                )}
-              </div>
-            </div>
-          ))}
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12 }}>
+          <div style={{ color: "#666" }}>共 {cartItems.length} 項</div>
+          <div style={{ fontWeight: 900, fontSize: 18 }}>合計 NT$ {fmt(total)}</div>
         </div>
 
-        {/* 底部操作列 */}
-        <div
-          style={{
-            position: "sticky",
-            bottom: 0,
-            background: "#fff",
-            borderTop: "1px solid #f0f0f0",
-            padding: 12,
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: 8,
-            borderBottomLeftRadius: 16,
-            borderBottomRightRadius: 16,
-          }}
-        >
-          <button onClick={onClose}>完成</button>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+          <button onClick={onClose} style={{ padding: "10px 16px", borderRadius: 12 }}>關閉</button>
+          <button
+            onClick={handleCheckoutClick}
+            disabled={placing || cartItems.length === 0}
+            style={{ padding: "10px 16px", borderRadius: 12, border: "2px solid #333", background: "#fff", fontWeight: 800, cursor: placing ? "not-allowed" : "pointer" }}
+            title={isAnonymous ? "請先登入 / 建立帳號再送單" : "送出訂單"}
+          >
+            {placing ? "送出中…" : (isAnonymous ? "先登入再送單" : "送出訂單")}
+          </button>
         </div>
       </div>
     </div>

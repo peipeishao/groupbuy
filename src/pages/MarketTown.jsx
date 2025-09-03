@@ -6,13 +6,12 @@ import OrderSheetModal from "../components/OrderSheetModal.jsx";
 import CartModal from "../components/CartModal.jsx";
 import ChatBox from "../components/ChatBox.jsx";
 import HUD from "../components/HUD.jsx";
+import LoginGate from "../components/LoginGate.jsx";
 
 export default function MarketTown() {
-  // 商品選單彈窗：null | "chicken" | "cannele"
-  const [openSheet, setOpenSheet] = useState(null);
+  const [openSheet, setOpenSheet] = useState(null); // null | "chicken" | "cannele"
   const [cartOpen, setCartOpen] = useState(false);
 
-  // 中央表格容器高度
   const tableWrapRef = useRef(null);
   useEffect(() => {
     const el = tableWrapRef.current;
@@ -31,7 +30,6 @@ export default function MarketTown() {
         backgroundPosition: "center",
       }}
     >
-      {/* 示意標題 */}
       <div
         style={{
           position: "absolute",
@@ -49,40 +47,21 @@ export default function MarketTown() {
         許願池
       </div>
 
-      {/* === 建築圖片：點擊開啟攤位清單 === */}
       <img
         src="/buildings/chicken.png"
         alt="雞胸肉攤位"
         onClick={() => setOpenSheet("chicken")}
-        style={{
-          position: "absolute",
-          left: 420,
-          top: 140,
-          width: 160,
-          cursor: "pointer",
-          userSelect: "none",
-          zIndex: 10,
-        }}
+        style={{ position: "absolute", left: 420, top: 140, width: 160, cursor: "pointer", userSelect: "none", zIndex: 10 }}
         draggable={false}
       />
-
       <img
         src="/buildings/cannele.png"
         alt="可麗露攤位"
         onClick={() => setOpenSheet("cannele")}
-        style={{
-          position: "absolute",
-          left: 760,
-          top: 150,
-          width: 160,
-          cursor: "pointer",
-          userSelect: "none",
-          zIndex: 10,
-        }}
+        style={{ position: "absolute", left: 760, top: 150, width: 160, cursor: "pointer", userSelect: "none", zIndex: 10 }}
         draggable={false}
       />
 
-      {/* 中央訂單彙總表 */}
       <div
         style={{
           position: "absolute",
@@ -103,7 +82,6 @@ export default function MarketTown() {
         </div>
       </div>
 
-      {/* 左下：聊天室（常駐） */}
       <div
         style={{
           position: "fixed",
@@ -124,13 +102,11 @@ export default function MarketTown() {
         <ChatBox />
       </div>
 
-      {/* 多人移動層 */}
+      {/* 僅已登入者會出現在 playersPublic */}
       <Town />
 
-      {/* 底部 HUD（購物袋按鈕會打開 CartModal） */}
       <HUD onOpenCart={() => setCartOpen(true)} />
 
-      {/* 商品清單彈窗 */}
       {openSheet && (
         <OrderSheetModal
           open={!!openSheet}
@@ -139,8 +115,10 @@ export default function MarketTown() {
         />
       )}
 
-      {/* 購物袋彈窗 */}
       {cartOpen && <CartModal onClose={() => setCartOpen(false)} />}
+
+      {/* 登入 / 註冊（匿名升級） */}
+      <LoginGate />
     </div>
   );
 }

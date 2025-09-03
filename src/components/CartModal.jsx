@@ -1,116 +1,128 @@
-// src/components/CartModal.jsx
-import React, { useMemo } from "react";
-import { db } from "../firebase.js";
-import { push, ref, serverTimestamp } from "firebase/database";
+import React, { useEffect, useMemo, useState } from "react";
+import { db, auth } from "../firebase.js";
+import { ref, push, set, serverTimestamp } from "firebase/database";
 import { usePlayer } from "../store/playerContext.jsx";
-import { useCart } from "../store/useCart.js"; // ✅ 改為在元件內部讀購物袋
+import { useCart } from "../store/useCart.js";
+
+const fmt = (n) => new Intl.NumberFormat("zh-TW").format(n || 0);
 
 export default function CartModal({ onClose }) {
-  const player = usePlayer();
-  const { items, clearCart } = useCart(); // ✅ 從 Firebase carts/{uid} 取得資料
+  const { isAnonymous, openLoginGate, roleName, avatar, uid } = usePlayer();
+  const { items = [], reload, clearCart } = useCart();
+  const [placing, setPlacing] = useState(false);
 
-  // 新舊 context 相容：優先 roleName，否則退回 profile.name
-  const uid = player?.uid || "dev-local";
-  const roleName = player?.roleName || player?.profile?.name || "旅人";
+  const total = useMemo(
+    () => items.reduce((s, x) => s + (Number(x.price)||0)*(Number(x.qty)||0), 0),
+    [items]
+  );
 
-  const { total, itemCount } = useMemo(() => {
-    const t = (items || []).reduce(
-      (s, x) => s + (Number(x.price) || 0) * (Number(x.qty) || 0),
-      0
-    );
-    const c = (items || []).reduce((s, x) => s + (Number(x.qty) || 0), 0);
-    return { total: t, itemCount: c };
-  }, [items]);
-
-  const submit = async () => {
-    if (!items?.length || itemCount === 0) return;
-
-    // 目前沿用「每個品項一筆訂單」
-    for (const it of items) {
-      const qty = Number(it.qty) || 0;
-      if (qty <= 0) continue;
-      await push(ref(db, "orders"), {
-        uid,
-        orderedBy: { uid, roleName }, // ✅ 公開顯示用角色名稱
-        stallId: it.stallId || "unknown",
-        itemId: it.id,
-        itemName: it.name,
-        qty,
-        total: (Number(it.price) || 0) * qty,
-        paid: false,
-        ts: serverTimestamp(), // RTDB 毫秒時間戳
-      });
+  const placeOrder = async () => {
+    if (placing || !items.length) return;
+    if (isAnonymous) {
+      openLoginGate({ mode: "upgrade", next: "checkout" });
+      return;
     }
+    try {
+      setPlacing(true);
+      const orderRef = push(ref(db, "orders"));
+      const payload = {
+        uid,
+        orderedBy: { uid, roleName, avatar },
+        items: items.map(({ stallId, id, name, price, qty }) => ({ stallId, id, name, price, qty })),
+        total,
+        status: "submitted",
+        paid: false,
+        paidAt: null,
+        last5: null,
+        createdAt: serverTimestamp(),
+      };
+      await set(orderRef, payload);
 
-    alert("訂單已送出 ✅");
-    await clearCart(); // ✅ 送單後清空購物袋（Firebase）
-    onClose?.();
+      if (typeof clearCart === "function") {
+        await clearCart();
+      } else if (auth.currentUser?.uid) {
+        await set(ref(db, `carts/${auth.currentUser.uid}`), { items: {}, updatedAt: Date.now() });
+      }
+
+      await reload?.();
+      onClose?.();
+      alert("訂單已送出！");
+    } catch (err) {
+      console.error(err);
+      alert("送單失敗，請稍後再試");
+    } finally {
+      setPlacing(false);
+    }
   };
 
-  const handleClear = async () => {
-    await clearCart();
+  useEffect(() => {
+    const onOk = (e) => { if (e?.detail?.next === "checkout") placeOrder(); };
+    window.addEventListener("login-success", onOk);
+    return () => window.removeEventListener("login-success", onOk);
+  }, [items, total, uid, roleName, avatar, placing, isAnonymous]);
+
+  const handleCheckout = () => {
+    if (isAnonymous) {
+      openLoginGate({ mode: "upgrade", next: "checkout" });
+      return;
+    }
+    placeOrder();
   };
 
   return (
-    <div
-      onClick={(e) => e.target === e.currentTarget && onClose?.()}
-      style={{
-        position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", zIndex: 60,
-        display: "grid", placeItems: "center"
-      }}
-    >
-      <div style={{
-        width: 640, background: "#fff", borderRadius: 16, border: "1px solid #eee",
-        boxShadow: "0 16px 36px rgba(0,0,0,.25)", overflow: "hidden"
-      }}>
-        {/* 標頭：顯示總件數＆總金額 */}
-        <div style={{
-          display: "flex", justifyContent: "space-between", alignItems: "center",
-          padding: 12, borderBottom: "1px solid #eee"
-        }}>
-          <strong>
-            🧺 購物袋（共 {itemCount} 件 / 🪙 {total}）
-          </strong>
-          <button onClick={onClose} aria-label="關閉購物袋">✕</button>
+    <div role="dialog" aria-modal="true" onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.28)", display: "grid", placeItems: "center", zIndex: 160 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(880px, 96vw)", background: "#fff", borderRadius: 16, padding: 16, position: "relative" }}>
+        <button onClick={onClose} aria-label="關閉" style={{ position: "absolute", right: 8, top: 8, borderRadius: 999, width: 36, height: 36 }}>×</button>
+
+        <h3 style={{ marginTop: 4, marginBottom: 12, fontWeight: 900 }}>購物袋</h3>
+
+        <div style={{ border: "1px solid #eee", borderRadius: 12, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead style={{ background: "#fafafa" }}>
+              <tr>
+                <th style={{ textAlign: "left", padding: 8 }}>攤位</th>
+                <th style={{ textAlign: "left", padding: 8 }}>品項</th>
+                <th style={{ textAlign: "right", padding: 8, width: 80 }}>單價</th>
+                <th style={{ textAlign: "right", padding: 8, width: 80 }}>數量</th>
+                <th style={{ textAlign: "right", padding: 8, width: 120 }}>小計</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.length === 0 ? (
+                <tr><td colSpan="5" style={{ padding: 12, textAlign: "center", color: "#888" }}>購物袋是空的</td></tr>
+              ) : items.map((it) => {
+                const sub = (Number(it.price)||0) * (Number(it.qty)||0);
+                return (
+                  <tr key={`${it.stallId}|${it.id}`} style={{ borderTop: "1px solid #f0f0f0" }}>
+                    <td style={{ padding: 8 }}>{it.stallId}</td>
+                    <td style={{ padding: 8 }}>{it.name}</td>
+                    <td style={{ padding: 8, textAlign: "right" }}>{fmt(it.price)}</td>
+                    <td style={{ padding: 8, textAlign: "right" }}>{it.qty}</td>
+                    <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>{fmt(sub)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
 
-        <div style={{ padding: 16 }}>
-          {!items?.length || itemCount === 0 ? (
-            <div style={{ color: "#777" }}>還沒有加入任何品項</div>
-          ) : (
-            <>
-              <div style={{ display: "grid", gap: 8 }}>
-                {items.map((c, idx) => {
-                  const qty = Number(c.qty) || 0;
-                  if (qty <= 0) return null;
-                  const lineTotal = (Number(c.price) || 0) * qty;
-                  return (
-                    <div key={`${c.stallId}|${c.id}|${idx}`} style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span>[{c.stallId}] {c.name} × {qty}</span>
-                      <span>🪙 {lineTotal}</span>
-                    </div>
-                  );
-                })}
-              </div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12 }}>
+          <div style={{ color: "#666" }}>共 {items.length} 項</div>
+          <div style={{ fontWeight: 900, fontSize: 18 }}>合計 NT$ {fmt(total)}</div>
+        </div>
 
-              {/* 仍保留底部合計，與標頭一致 */}
-              <div style={{ marginTop: 12, fontWeight: 800, textAlign: "right" }}>
-                合計：🪙 {total}
-              </div>
-
-              <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
-                <button onClick={handleClear} style={{ flex: 1 }}>清空</button>
-                <button
-                  onClick={submit}
-                  style={{ flex: 2, fontWeight: 800 }}
-                  disabled={itemCount === 0}
-                  title={itemCount === 0 ? "購物袋是空的" : `以「${roleName}」送單`}
-                >
-                  確認送單（{roleName}）
-                </button>
-              </div>
-            </>
-          )}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+          <button onClick={onClose} style={{ padding: "10px 16px", borderRadius: 12 }}>關閉</button>
+          <button
+            onClick={handleCheckout}
+            disabled={placing || items.length === 0}
+            style={{ padding: "10px 16px", borderRadius: 12, border: "2px solid #333", background: "#fff",
+                    fontWeight: 800, cursor: placing ? "not-allowed" : "pointer" }}
+            title={isAnonymous ? "請先登入 / 建立帳號再送單" : "送出訂單"}
+          >
+            {placing ? "送出中…" : (isAnonymous ? "先登入再送單" : "送出訂單")}
+          </button>
         </div>
       </div>
     </div>
