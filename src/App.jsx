@@ -9,14 +9,26 @@ import LoginGate from "./components/LoginGate.jsx";
 
 export default function App() {
   useEffect(() => {
-    const off = onAuthStateChanged(auth, (u) => { if (u) ensureAdmin?.(); });
+    // 監聽登入狀態
+    const off = onAuthStateChanged(auth, async (u) => {
+      if (!u) return;
+      try {
+        // 只檢查，不寫入
+        await ensureAdmin();
+        // 若你需要在「第一次初始化專案」時自動成為 admin，可以這樣：
+        // await ensureAdmin({ bootstrap: true });
+      } catch (e) {
+        console.error("ensureAdmin 失敗：", e);
+      }
+    });
     return () => off();
   }, []);
 
   return (
     <PlayerProvider>
       <MarketTown />
-      <LoginGate />   {/* ✅ 掛著但預設隱藏 */}
+      {/* 登入/註冊（匿名升級） */}
+      <LoginGate />
     </PlayerProvider>
   );
 }

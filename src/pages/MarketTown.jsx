@@ -7,10 +7,12 @@ import CartModal from "../components/CartModal.jsx";
 import ChatBox from "../components/ChatBox.jsx";
 import HUD from "../components/HUD.jsx";
 import LoginGate from "../components/LoginGate.jsx";
+import ProductManager from "../components/ProductManager.jsx"; // ✅ 新增：商品管理頁
 
 export default function MarketTown() {
   const [openSheet, setOpenSheet] = useState(null); // null | "chicken" | "cannele"
   const [cartOpen, setCartOpen] = useState(false);
+  const [pmOpen, setPmOpen] = useState(false); // ✅ 商品管理視窗
 
   const tableWrapRef = useRef(null);
   useEffect(() => {
@@ -47,21 +49,41 @@ export default function MarketTown() {
         許願池
       </div>
 
+      {/* 攤位：雞胸肉 */}
       <img
         src="/buildings/chicken.png"
         alt="雞胸肉攤位"
         onClick={() => setOpenSheet("chicken")}
-        style={{ position: "absolute", left: 420, top: 140, width: 160, cursor: "pointer", userSelect: "none", zIndex: 10 }}
+        style={{
+          position: "absolute",
+          left: 800,
+          top: 10,
+          width: 200,
+          cursor: "pointer",
+          userSelect: "none",
+          zIndex: 10,
+        }}
         draggable={false}
       />
+
+      {/* 攤位：可麗露 */}
       <img
         src="/buildings/cannele.png"
         alt="可麗露攤位"
         onClick={() => setOpenSheet("cannele")}
-        style={{ position: "absolute", left: 760, top: 150, width: 160, cursor: "pointer", userSelect: "none", zIndex: 10 }}
+        style={{
+          position: "absolute",
+          left: 1090,
+          top: 10,
+          width: 280,
+          cursor: "pointer",
+          userSelect: "none",
+          zIndex: 10,
+        }}
         draggable={false}
       />
 
+      {/* 中央訂單表 */}
       <div
         style={{
           position: "absolute",
@@ -82,6 +104,7 @@ export default function MarketTown() {
         </div>
       </div>
 
+      {/* 聊天室 */}
       <div
         style={{
           position: "fixed",
@@ -102,11 +125,16 @@ export default function MarketTown() {
         <ChatBox />
       </div>
 
-      {/* 僅已登入者會出現在 playersPublic */}
+      {/* 小鎮角色同步 */}
       <Town />
 
-      <HUD onOpenCart={() => setCartOpen(true)} />
+      {/* HUD：含購物袋 + 商品管理入口（admin 才會看到） */}
+      <HUD
+        onOpenCart={() => setCartOpen(true)}
+        onOpenProductManager={() => setPmOpen(true)}
+      />
 
+      {/* 攤位訂購表單 */}
       {openSheet && (
         <OrderSheetModal
           open={!!openSheet}
@@ -115,7 +143,11 @@ export default function MarketTown() {
         />
       )}
 
+      {/* 購物袋 */}
       {cartOpen && <CartModal onClose={() => setCartOpen(false)} />}
+
+      {/* 商品管理（僅 admin 可見） */}
+      {pmOpen && <ProductManager onClose={() => setPmOpen(false)} />}
 
       {/* 登入 / 註冊（匿名升級） */}
       <LoginGate />

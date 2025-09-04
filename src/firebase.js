@@ -1,7 +1,8 @@
 // src/firebase.js
-import { initializeApp } from "firebase/app";
-import { getDatabase, ref, set } from "firebase/database";
+import { initializeApp, getApps, getApp } from "firebase/app";
+import { getDatabase, ref as dbRef, set } from "firebase/database";
 import { getAuth } from "firebase/auth";
+import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -14,21 +15,44 @@ const firebaseConfig = {
   // measurementId 可省略
 };
 
-const app = initializeApp(firebaseConfig);
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const db = getDatabase(app);
 export const auth = getAuth(app);
+export const storage = getStorage(app); // 
 
-// 嘗試把目前登入者加入 admins
-export async function ensureAdmin() {
-  const user = auth.currentUser;
-  if (!user) return;
-  const uid = user.uid; // 取目前登入者 UID
+/**
+ * 檢查目前使用者是否為 admin。
+ * @param {{ bootstrap?: boolean }} param0
+ *  - bootstrap: 當 RTDB 還沒有任何 admins 時，將目前使用者設為第一位 admin。
+ *    （對應你的 rules：admins 節點不存在時允許首位寫入）
+ * @returns {Promise<boolean>} 是否為 admin
+ */
+export async function ensureAdmin({ bootstrap = false } = {}) {
+  const u = auth.currentUser;
+  if (!u) return false;
+
+  // 已是 admin？
+  const mineRef = dbRef(db, `admins/${u.uid}`);
   try {
-    await set(ref(db, `admins/${uid}`), true);
-    console.log("✅ 已將自己加入 admins：", uid);
-  } catch (err) {
-    console.error("❌ 新增 admin 失敗：", err);
+    const mineSnap = await get(mineRef);
+    if (mineSnap.exists() && mineSnap.val() === true) return true;
+  } catch (_e) {
+    // 忽略讀取失敗，往下嘗試 bootstrap 流程
   }
+
+  if (!bootstrap) return false;
+
+  // 僅在 admins 節點完全不存在時，註冊第一位 admin
+  const rootRef = dbRef(db, "admins");
+  const rootSnap = await get(rootRef);
+  if (!rootSnap.exists()) {
+    await set(mineRef, true);
+    return true;
+  }
+
+  return false;
 }
-
-
+if (typeof window !== "undefined") {
+  window.auth = auth;
+  window.db = db;
+}
