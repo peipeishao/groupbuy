@@ -1,10 +1,9 @@
 // src/components/HUD.jsx
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { usePlayer } from "../store/playerContext.jsx";
 import { useCart } from "../store/useCart.js";
-import { signOut } from "firebase/auth";
-import { auth } from "../firebase.js";
 import ProfileEditor from "./ProfileEditor.jsx";
+import AdminProductModal from "./AdminProductModal.jsx";
 
 const AVATAR_EMOJI = { bunny: "🐰", bear: "🐻", cat: "🐱", duck: "🦆" };
 
@@ -14,84 +13,78 @@ export default function HUD({ onOpenCart }) {
 
   const { items } = useCart();
   const [editOpen, setEditOpen] = useState(false);
+  const [pmOpen, setPmOpen] = useState(false); // 管理商品面板
 
-  const roleName = player?.roleName || player?.profile?.roleName || "旅人";
-  const realName = player?.realName || player?.profile?.realName || "";
-  const avatarKey = player?.avatar || player?.profile?.avatar || "bunny";
+  const cartQty = useMemo(() => {
+    try {
+      return Object.values(items || {}).reduce((sum, it) => sum + (it.qty || 0), 0);
+    } catch { return 0; }
+  }, [items]);
+
+  const isAnonymous = !!player?.isAnonymous;
+  const isAdmin = !!player?.isAdmin;
+  const roleName = player?.roleName || "旅人";
+  const avatar = player?.avatar || "bunny";
   const coins = player?.profile?.coins ?? 0;
-  const emoji = AVATAR_EMOJI[avatarKey] || "🙂";
-
-  const cartQty = useMemo(() => items.reduce((s, x) => s + (Number(x.qty) || 0), 0), [items]);
-
-  const isAnonymous =
-    player?.isAnonymous ??
-    ((!auth.currentUser) || !!auth.currentUser?.isAnonymous);
 
   return (
     <>
-      <div style={{
-        position: "fixed", left: "50%", bottom: 16, transform: "translateX(-50%)",
-        display: "flex", alignItems: "center", gap: 20, zIndex: 60
-      }}>
+      <div
+        style={{
+          position: "fixed",
+          right: "calc(16px + env(safe-area-inset-right))",
+          bottom: "calc(16px + env(safe-area-inset-bottom))",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "10px 12px",
+          background: "rgba(255,255,255,.95)",
+          border: "1px solid #eee",
+          borderRadius: 14,
+          boxShadow: "0 8px 24px rgba(0,0,0,.12)",
+          zIndex: 100,
+          flexWrap: "wrap",
+          maxWidth: "min(92vw, 620px)",
+        }}
+      >
+        {/* Avatar */}
         <div style={{
-          width: 64, height: 64, borderRadius: "50%", background: "rgba(255,255,255,.9)",
-          display: "grid", placeItems: "center", boxShadow: "0 6px 16px rgba(0,0,0,.15)", border: "1px solid #eee"
+          width: 40, height: 40, borderRadius: 12, background: "#fff",
+          border: "1px solid #eee", display: "grid", placeItems: "center"
         }}>
-          <div style={{ fontSize: 36 }}>{emoji}</div>
+          <div style={{ fontSize: 22 }}>{AVATAR_EMOJI[avatar] || "🙂"}</div>
         </div>
 
-        <div style={{
-          background: "rgba(255,255,255,.95)", padding: "10px 14px", borderRadius: 12,
-          border: "1px solid #eee", boxShadow: "0 6px 16px rgba(0,0,0,.12)", minWidth: 240
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-            <div>
-              <div style={{ fontWeight: 800, marginBottom: 4 }}>角色名稱（公開）</div>
-              <div style={{ fontSize: 18 }}>{roleName}</div>
-              {realName ? <div style={{ marginTop: 6, fontSize: 12, color: "#888" }}>真實姓名（只有你自己看得到）：{realName}</div> : null}
-            </div>
-
-            {/* 只有登入後才可編輯 */}
-            {!isAnonymous && (
-              <button
-                onClick={() => setEditOpen(true)}
-                style={{ padding: "8px 12px", borderRadius: 10, border: "2px solid #1d4ed8", background: "#fff", color: "#1d4ed8", fontWeight: 800, cursor: "pointer" }}
-                title="編輯角色名稱與頭像"
-              >
-                編輯角色
-              </button>
-            )}
+        {/* Name + coins */}
+        <div style={{ lineHeight: 1.2, marginRight: 6 }}>
+          <div style={{ fontWeight: 800 }}>
+            {roleName}{isAnonymous ? "（旅人）" : ""}
           </div>
+          <div style={{ fontSize: 12, color: "#666" }}>金幣：{coins}</div>
         </div>
 
-        <div style={{
-          background: "rgba(255,255,255,.95)", padding: "10px 14px", borderRadius: 12,
-          border: "1px solid #eee", boxShadow: "0 6px 16px rgba(0,0,0,.12)"
-        }}>
-          <div style={{ fontWeight: 800, marginBottom: 4 }}>金幣</div>
-          <div style={{ fontSize: 18 }}>🪙 {coins}</div>
-        </div>
+        {/* 編輯角色（登入者） */}
+        {!isAnonymous && (
+          <button
+            onClick={() => setEditOpen(true)}
+            style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #ddd", background: "#fff", fontWeight: 800, cursor: "pointer" }}
+            title="編輯角色"
+          >
+            編輯角色
+          </button>
+        )}
 
+        {/* 購物袋 */}
         <button
-          onClick={onOpenCart}
-          style={{
-            position: "relative",
-            padding: "18px 36px",
-            borderRadius: 14,
-            border: "2px solid #333",
-            background: "#fff",
-            boxShadow: "0 8px 22px rgba(0,0,0,.18)",
-            fontWeight: 800,
-            cursor: "pointer",
-            minWidth: 140
-          }}
-          aria-label={`開啟購物袋，目前共有 ${cartQty} 件`}
+          onClick={() => onOpenCart?.()}
+          style={{ position: "relative", padding: "8px 12px", borderRadius: 10, border: "1px solid #ddd", background: "#fff", fontWeight: 800, cursor: "pointer" }}
+          title="購物袋"
         >
           購物袋
           {cartQty > 0 && (
             <span style={{
-              position: "absolute", top: -8, right: -8, minWidth: 26, height: 26, padding: "0 8px",
-              borderRadius: 999, background: "#ef4444", color: "#fff", fontSize: 14, fontWeight: 800,
+              position: "absolute", top: -8, right: -8, minWidth: 22, height: 22, padding: "0 6px",
+              borderRadius: 999, background: "#ef4444", color: "#fff", fontSize: 12, fontWeight: 800,
               display: "grid", placeItems: "center", border: "2px solid #fff", boxShadow: "0 6px 16px rgba(0,0,0,.18)"
             }}>
               {cartQty}
@@ -99,11 +92,23 @@ export default function HUD({ onOpenCart }) {
           )}
         </button>
 
+        {/* 只有 Admin 看得到的管理商品 */}
+        {isAdmin && (
+          <button
+            onClick={() => setPmOpen(true)}
+            style={{ padding: "8px 12px", borderRadius: 10, border: "2px solid #16a34a", background: "#fff", color: "#16a34a", fontWeight: 800, cursor: "pointer" }}
+            title="開啟管理商品（僅管理員）"
+          >
+            管理商品
+          </button>
+        )}
+
+        {/* 登入 / 登出 */}
         {isAnonymous ? (
           <button
-            onClick={() => player?.openLoginGate ? player.openLoginGate({ mode: "upgrade" }) : alert("目前無法開啟登入視窗")}
-            style={{ padding: "12px 20px", borderRadius: 14, border: "2px solid #333", background: "#fff", fontWeight: 800, cursor: "pointer" }}
-            title="登入或建立帳號（將升級匿名帳號，購物袋無縫保留）"
+            onClick={() => player?.openLoginGate?.({ to: "login" })}
+            style={{ padding: "8px 12px", borderRadius: 10, border: "2px solid #333", background: "#fff", fontWeight: 800, cursor: "pointer" }}
+            title="登入或建立帳號（將升級匿名帳號，購物袋保留）"
           >
             登入 / 建立帳號
           </button>
@@ -113,26 +118,17 @@ export default function HUD({ onOpenCart }) {
               onClick={async () => {
                 if (player?.logoutAndGoAnonymous) {
                   await player.logoutAndGoAnonymous();
-                } else {
-                  await signOut(auth);
                 }
               }}
-              style={{ padding: "12px 20px", borderRadius: 14, border: "2px solid #c00", background: "#fff", color: "#c00", fontWeight: 800, cursor: "pointer" }}
-              title="登出並回到匿名模式"
+              style={{ padding: "8px 12px", borderRadius: 10, border: "2px solid #333", background: "#fff", fontWeight: 800, cursor: "pointer" }}
+              title="登出"
             >
               登出
             </button>
+
             <button
-              onClick={async () => {
-                if (player?.logoutAndGoAnonymous) {
-                  await player.logoutAndGoAnonymous();
-                  setTimeout(() => player?.openLoginGate?.({ mode: "signin" }), 0);
-                } else {
-                  await signOut(auth);
-                  alert("請重新登入");
-                }
-              }}
-              style={{ padding: "12px 20px", borderRadius: 14, border: "2px solid #333", background: "#fff", fontWeight: 800, cursor: "pointer" }}
+              onClick={() => player?.openLoginGate?.({ to: "login" })}
+              style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #ddd", background: "#fff", fontWeight: 800, cursor: "pointer" }}
               title="以另一個帳號登入"
             >
               切換帳號
@@ -141,8 +137,11 @@ export default function HUD({ onOpenCart }) {
         )}
       </div>
 
-      {/* 編輯角色（僅登入者可見） */}
+      {/* 編輯角色 Modal */}
       <ProfileEditor open={editOpen && !isAnonymous} onClose={() => setEditOpen(false)} />
+
+      {/* 管理商品 Modal（僅 admin 實際可用） */}
+      <AdminProductModal open={pmOpen} onClose={() => setPmOpen(false)} />
     </>
   );
 }

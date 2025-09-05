@@ -8,6 +8,7 @@ import ChatBox from "../components/ChatBox.jsx";
 import HUD from "../components/HUD.jsx";
 import LoginGate from "../components/LoginGate.jsx";
 import ProductManager from "../components/ProductManager.jsx"; // ✅ 新增：商品管理頁
+import OrderHistoryFab from "../components/OrderHistoryFab.jsx";
 
 export default function MarketTown() {
   const [openSheet, setOpenSheet] = useState(null); // null | "chicken" | "cannele"
@@ -101,6 +102,7 @@ export default function MarketTown() {
       >
         <div ref={tableWrapRef} style={{ overflow: "auto", borderRadius: 12 }}>
           <OrdersSummaryTable />
+          <OrderHistoryFab />
         </div>
       </div>
 

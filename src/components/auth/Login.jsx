@@ -1,114 +1,234 @@
-import React, { useState } from "react";
+// src/components/auth/Login.jsx
+import React, { useEffect, useRef, useState } from "react";
+import { auth } from "../../firebase.js";
 import {
-  browserLocalPersistence,
-  setPersistence,
   signInWithEmailAndPassword,
-  sendPasswordResetEmail,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
 } from "firebase/auth";
-import { auth, db } from "../../firebase.js";
-import { ref as dbRef, get, set, remove } from "firebase/database";
 
-// 將「帳號」轉換成 email（若已含 @ 則原樣）
-function toEmail(account) {
-  if (!account) return "";
-  return account.includes("@") ? account : `${account}@groupbuy.local`;
+const LOCAL_DOMAIN = "groupbuy.local";
+
+// 將「帳號或 email」標準化為 email：
+// - 若沒有 @ ：視為帳號 → 強制小寫 + 只留 a-z0-9 → 補上 @groupbuy.local
+// - 若有 @  ：視為 email → 全部轉成小寫
+function toEmailNormalized(input) {
+  const s = String(input || "").trim();
+  if (!s) return "";
+  if (s.includes("@")) return s.toLowerCase();
+  const id = s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  return `${id}@${LOCAL_DOMAIN}`;
 }
 
-// 匿名 → 正式帳號：合併購物袋
-async function migrateCart(anonUid, newUid) {
-  if (!anonUid || !newUid || anonUid === newUid) return;
-  const fromSnap = await get(dbRef(db, `carts/${anonUid}`));
-  if (!fromSnap.exists()) return;
-
-  const from = fromSnap.val();
-  const toSnap = await get(dbRef(db, `carts/${newUid}`));
-  const to = toSnap.exists() ? toSnap.val() : { items: {}, updatedAt: Date.now() };
-
-  const merged = { items: { ...(to.items || {}) }, updatedAt: Date.now() };
-  for (const [k, v] of Object.entries(from.items || {})) {
-    merged.items[k] = merged.items[k]
-      ? { ...merged.items[k], qty: Number(merged.items[k].qty || 0) + Number(v.qty || 0) }
-      : v;
+function mapFirebaseError(e) {
+  const code = String(e?.code || "").replace("auth/", "");
+  switch (code) {
+    case "invalid-credential":
+    case "user-not-found":
+    case "wrong-password":
+      return "帳號或密碼不正確";
+    case "too-many-requests":
+      return "嘗試次數過多，請稍後再試";
+    case "network-request-failed":
+      return "網路連線異常，請檢查網路後再試";
+    default:
+      return e?.message || "登入失敗，請再試一次";
   }
-  await set(dbRef(db, `carts/${newUid}`), merged);
-  await remove(dbRef(db, `carts/${anonUid}`));
 }
 
-export default function Login({ onClose, goSignup, resumeAction }) {
-  const [account, setAccount] = useState(""); // 只輸入前半（例：peishao）
+export default function Login({
+  presetEmail = "",
+  autoSubmitToken = 0,   // 點「記住的帳號」後會變動，觸發自動送出流程
+  onClose,
+  goSignup,
+  resumeAction,
+}) {
+  const [idOrEmail, setIdOrEmail] = useState(presetEmail || "");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
 
-  const onSubmit = async (e) => {
+  const emailRef = useRef(null);
+  const passRef = useRef(null);
+  const formRef = useRef(null);
+
+  // 預設帶入時 → 聚焦密碼；否則聚焦帳號欄
+  useEffect(() => {
+    if (presetEmail) {
+      setIdOrEmail(presetEmail);
+      setTimeout(() => passRef.current?.focus(), 0);
+    } else {
+      setTimeout(() => emailRef.current?.focus(), 0);
+    }
+  }, [presetEmail]);
+
+  // 當「記住的帳號」被點擊時，嘗試自動帶入並送出
+  useEffect(() => {
+    if (!autoSubmitToken) return;
+    let stopped = false;
+
+    async function tryAuto() {
+      passRef.current?.focus();
+
+      // 優先使用瀏覽器密碼管理器
+      try {
+        if ("credentials" in navigator) {
+          const cred = await navigator.credentials.get({ password: true, mediation: "required" });
+          if (cred && cred.type === "password") {
+            const emailToUse = toEmailNormalized(cred.id || idOrEmail);
+            setIdOrEmail(emailToUse);
+            setPassword(cred.password || "");
+            setTimeout(() => formRef.current?.requestSubmit(), 0);
+            return;
+          }
+        }
+      } catch {/* ignore */}
+
+      // 2 秒內輪詢：若密碼被自動填入 → 自動送出
+      const start = Date.now();
+      const iv = setInterval(() => {
+        if (stopped) { clearInterval(iv); return; }
+        const val = passRef.current?.value;
+        if (val && val.length > 0) {
+          setPassword(val);
+          clearInterval(iv);
+          formRef.current?.requestSubmit();
+        } else if (Date.now() - start > 2000) {
+          clearInterval(iv);
+        }
+      }, 120);
+    }
+
+    tryAuto();
+    return () => { stopped = true; };
+  }, [autoSubmitToken, idOrEmail]);
+
+  // 🟢 這裡把輸入「沒有 @」的情況下自動轉成「小寫英數」
+  function onChangeUser(e) {
+    const v = e.target.value || "";
+    if (v.includes("@")) {
+      setIdOrEmail(v.toLowerCase()); // email → 全轉小寫（避免大小寫造成困惑）
+    } else {
+      // 帳號 → 只保留小寫英數，從源頭降低「格式錯誤」機率
+      setIdOrEmail(v.toLowerCase().replace(/[^a-z0-9]/g, ""));
+    }
+  }
+
+  async function onSubmit(e) {
     e?.preventDefault?.();
-    if (!account || !password) return alert("請輸入帳號與密碼");
+    setErr("");
 
-    const email = toEmail(account);  // ✅ 自動轉 email
+    const raw = String(idOrEmail || "").trim();
+    if (!raw) { setErr("請輸入帳號"); return; }
+
+    const emailToUse = toEmailNormalized(raw);
+
     setLoading(true);
-    const wasAnon = !!auth.currentUser?.isAnonymous;
-    const anonUid = wasAnon ? auth.currentUser.uid : null;
-
     try {
-      await setPersistence(auth, browserLocalPersistence);
-      const cred = await signInWithEmailAndPassword(auth, email, password);
+      await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence);
+      await signInWithEmailAndPassword(auth, emailToUse, password);
 
-      if (wasAnon) await migrateCart(anonUid, cred.user.uid);
+      // 讓瀏覽器記住帳密（提高下次一鍵帶入成功率）
+      try {
+        if ("credentials" in navigator && window.PasswordCredential) {
+          const c = new window.PasswordCredential({
+            id: emailToUse,
+            password,
+            name: emailToUse.split("@")[0],
+          });
+          await navigator.credentials.store(c);
+        }
+      } catch {}
 
-      onClose?.();
       resumeAction?.();
-    } catch (err) {
-      const code = err?.code || "";
-      if (code === "auth/wrong-password") alert("密碼錯誤");
-      else if (code === "auth/user-not-found") alert("查無此帳號");
-      else alert(err.message || code);
+      onClose?.();
+    } catch (e) {
+      setErr(mapFirebaseError(e));
     } finally {
       setLoading(false);
     }
-  };
-
-  const onReset = async () => {
-    if (!account) return alert("先輸入帳號");
-    try {
-      await sendPasswordResetEmail(auth, toEmail(account));
-      alert("已寄出重設密碼信");
-    } catch (e) {
-      alert(e.message || "發送失敗");
-    }
-  };
+  }
 
   return (
-    <form onSubmit={onSubmit} style={panel}>
-      <h3 style={{marginTop:0}}>登入</h3>
-      <input
-        placeholder="帳號（不需輸入 @groupbuy.local）"
-        value={account}
-        onChange={(e)=>setAccount(e.target.value)}
-        style={input}
-      />
-      <input
-        type="password"
-        placeholder="密碼"
-        value={password}
-        onChange={(e)=>setPassword(e.target.value)}
-        style={input}
-      />
-      <label style={{ fontSize: 12 }}>
-        <input type="checkbox" checked={remember} onChange={(e)=>setRemember(e.target.checked)} /> 記住我
-      </label>
-      <div style={{ display:"flex", gap:8, marginTop:8 }}>
-        <button type="submit" disabled={loading} style={btnPrimary}>{loading ? "登入中…" : "登入"}</button>
-        <button type="button" onClick={onReset} style={btn}>忘記密碼</button>
-        <button type="button" onClick={goSignup} style={btn}>建立帳號</button>
-      </div>
-      <div style={{fontSize:12, color:"#666", marginTop:8}}>
-        實際登入 email：{account ? toEmail(account) : "（輸入帳號後顯示）"}
+    <form ref={formRef} onSubmit={onSubmit} autoComplete="on">
+      <div style={{ display: "grid", gap: 8 }}>
+        <label style={{ fontWeight: 800 }}>帳號</label>
+        <input
+          id="login-email"
+          ref={emailRef}
+          type="text"
+          name="username"
+          value={idOrEmail}
+          onChange={onChangeUser}
+          placeholder={`例如：pizzawater（會自動加上 @${LOCAL_DOMAIN}）`}
+          required
+          autoComplete="username"
+          style={input}
+        />
+
+        <label style={{ fontWeight: 800, marginTop: 8 }}>密碼</label>
+        <input
+          id="login-pass"
+          ref={passRef}
+          type="password"
+          name="current-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="請輸入密碼"
+          required
+          autoComplete="current-password"
+          style={input}
+        />
+
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+          記住我（下次自動保持登入）
+        </label>
+
+        {err && <div style={{ color: "#b91c1c", fontSize: 12 }}>{err}</div>}
+
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            padding: "10px 14px",
+            borderRadius: 10,
+            border: "2px solid #1d4ed8",
+            background: loading ? "#eef2ff" : "#fff",
+            color: "#1d4ed8",
+            fontWeight: 800,
+            cursor: loading ? "default" : "pointer",
+            marginTop: 8,
+          }}
+        >
+          {loading ? "登入中…" : "登入"}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => goSignup?.()}
+          style={{
+            padding: "8px 12px",
+            borderRadius: 10,
+            border: "2px solid #333",
+            background: "#fff",
+            fontWeight: 800,
+            cursor: "pointer",
+          }}
+        >
+          建立帳號
+        </button>
       </div>
     </form>
   );
 }
 
-const panel = { background:"#fff", border:"1px solid #eee", borderRadius:12, padding:16, width:360 };
-const input = { width:"100%", padding:"10px 12px", border:"1px solid #ddd", borderRadius:10, marginTop:8 };
-const btn = { padding:"10px 16px", border:"2px solid #333", borderRadius:12, background:"#fff", fontWeight:800, cursor:"pointer" };
-const btnPrimary = { ...btn, borderColor:"#1d4ed8", color:"#1d4ed8" };
+const input = {
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: "1px solid #ddd",
+  background: "#fff",
+  width: "100%",
+};

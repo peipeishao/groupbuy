@@ -6,38 +6,42 @@ import { onValue, ref as dbRef, update } from "firebase/database";
 
 const SPEED = 4;
 const MIN_XY = 0;
-const MAX_XY = 5000; // 依你的 RTDB 規則
-// 右上角生成範圍（依你的地圖座標自行微調）
+const MAX_XY = 5000;
 const SPAWN_BOX = { x1: 3600, y1: 200, x2: 3900, y2: 440 };
 
-function randInt(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
-function randPointInBox({ x1, y1, x2, y2 }) {
-  const lx = Math.min(x1, x2), hx = Math.max(x1, x2);
-  const ly = Math.min(y1, y2), hy = Math.max(y1, y2);
-  return { x: randInt(lx, hx), y: randInt(ly, hy) };
-}
-
+// ✅ 氣泡顯示時長（毫秒）
+const BUBBLE_MS = 3000;
 
 const AVATAR_EMOJI = { bunny: "🐰", bear: "🐻", cat: "🐱", duck: "🦆" };
 
+const LS_RIGHT_COLLAPSE = "gb.rightSidebar.collapsed";
+
 export default function Town() {
-  const { uid, profile, isAnonymous } = usePlayer() || {};
+  const { uid, profile, isConnected } = usePlayer() || {};
   const [players, setPlayers] = useState({});
   const [maskReady, setMaskReady] = useState(false);
 
+  // --- movement internals ---
   const ctxRef = useRef(null);
   const keysRef = useRef({});
-  const rafRef = useRef(0);
   const lastSentRef = useRef({ x: null, y: null, dir: null });
+  const uidRef = useRef(null);
+  const myPosRef = useRef({ x: 400, y: 300, dir: "down" });
 
-  /* 1) 載入可走遮罩（可略過遮罩時也能移動顯示） */
+  // --- right roster panel ---
+  const [rightCollapsed, setRightCollapsed] = useState(
+    () => localStorage.getItem(LS_RIGHT_COLLAPSE) === "1"
+  );
+
+  useEffect(() => { uidRef.current = uid; }, [uid]);
+
+  // 走道遮罩（可無）
   useEffect(() => {
     const img = new Image();
     img.src = "/walkable-mask.png";
     img.onload = () => {
       const cvs = document.createElement("canvas");
-      cvs.width = img.width;
-      cvs.height = img.height;
+      cvs.width = img.width; cvs.height = img.height;
       const ctx = cvs.getContext("2d", { willReadFrequently: true });
       ctx.drawImage(img, 0, 0);
       ctxRef.current = ctx;
@@ -54,163 +58,163 @@ export default function Town() {
     return brightness > 128 || a === 0;
   };
 
-  /* 2) 訂閱 playersPublic（讀不到也沒關係，下面有 fallback 自己畫自己） */
+  // 訂閱所有玩家
   useEffect(() => {
-    const off = onValue(dbRef(db, "playersPublic"), (snap) => {
-      const v = snap.val() || {};
-      setPlayers(v);
-      // 除錯資訊
-      try {
-        const me = auth.currentUser?.uid;
-        console.log("[playersPublic] count=", Object.keys(v).length, "haveMe=", !!(me && v[me]));
-      } catch {}
-    }, (err) => {
-      console.warn("[playersPublic] subscribe error:", err);
-    });
+    const off = onValue(
+      dbRef(db, "playersPublic"),
+      (snap) => setPlayers(snap.val() || {}),
+      (err) => console.warn("[playersPublic] subscribe error:", err)
+    );
     return () => off();
   }, []);
 
-  /* 3) 鍵盤事件（打字時不攔截） */
+  // 鍵盤事件
   useEffect(() => {
     const isTyping = () => {
       const el = document.activeElement;
       const t = el?.tagName?.toLowerCase();
       return t === "input" || t === "textarea" || el?.isContentEditable;
     };
-    const isMoveKey = (k) =>
-      ["w", "a", "s", "d", "arrowup", "arrowleft", "arrowdown", "arrowright"].includes(k);
-
+    const moveKeys = ["w","a","s","d","arrowup","arrowleft","arrowdown","arrowright"];
     const kd = (e) => {
       const k = e.key.toLowerCase();
-      if (!isMoveKey(k) || isTyping()) return;
+      if (!moveKeys.includes(k) || isTyping()) return;
       e.preventDefault();
       keysRef.current[k] = true;
     };
     const ku = (e) => {
       const k = e.key.toLowerCase();
-      if (!isMoveKey(k) || isTyping()) return;
+      if (!moveKeys.includes(k) || isTyping()) return;
       keysRef.current[k] = false;
     };
     window.addEventListener("keydown", kd, { passive: false });
     window.addEventListener("keyup", ku);
+    const blur = () => { keysRef.current = {}; };
+    window.addEventListener("blur", blur);
     return () => {
       window.removeEventListener("keydown", kd);
       window.removeEventListener("keyup", ku);
+      window.removeEventListener("blur", blur);
     };
   }, []);
 
-  /* 4) 寫回自己的位置（節流） */
+  // uid 變更時重置鍵位與本地座標
+  useEffect(() => {
+    keysRef.current = {};
+    lastSentRef.current = { x: null, y: null, dir: null };
+    const px = Number(players?.[uid]?.x ?? profile?.x ?? 400);
+    const py = Number(players?.[uid]?.y ?? profile?.y ?? 300);
+    const pdir = String(players?.[uid]?.dir ?? profile?.dir ?? "down");
+    myPosRef.current = { x: px, y: py, dir: pdir };
+  }, [uid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 伺服器同步到自己的節點時，初次/重連以伺服器為準
+  useEffect(() => {
+    if (!uid) return;
+    const me = players[uid];
+    if (!me) return;
+    myPosRef.current = {
+      x: Number(me.x ?? myPosRef.current.x ?? 400),
+      y: Number(me.y ?? myPosRef.current.y ?? 300),
+      dir: String(me.dir ?? myPosRef.current.dir ?? "down"),
+    };
+  }, [players, uid]);
+
+  // 寫回自己位置
   const sendMyPosition = useCallback(async (nx, ny, dir) => {
     const u = auth.currentUser;
-    if (!u || u.isAnonymous) return;
+    if (!u) return;
     nx = Math.max(MIN_XY, Math.min(MAX_XY, nx));
     ny = Math.max(MIN_XY, Math.min(MAX_XY, ny));
-
     const last = lastSentRef.current;
     if (last.x === nx && last.y === ny && last.dir === dir) return;
-
     try {
-      await update(dbRef(db, `playersPublic/${u.uid}`), {
-        x: nx, y: ny, dir, updatedAt: Date.now(),
-      });
+      await update(dbRef(db, `playersPublic/${u.uid}`), { x: nx, y: ny, dir, updatedAt: Date.now() });
       lastSentRef.current = { x: nx, y: ny, dir };
-    } catch (e) {
-      console.warn("[updatePosition] failed", e);
-    }
+    } catch (e) { console.warn("[updatePosition] failed", e); }
   }, []);
 
-  /* 5) 主 loop（使用 profile 來驅動，即使 players 訂閱不到也能動） */
+  // 主迴圈（匿名/登入都可移動）
   useEffect(() => {
     let raf = 0;
     const tick = () => {
-      let x = Number(profile?.x ?? 400);
-      let y = Number(profile?.y ?? 300);
-      let dir = String(profile?.dir ?? "down");
+      const meUid = uidRef.current;
+      if (meUid) {
+        let { x, y, dir } = myPosRef.current;
 
-      const k = keysRef.current;
-      let nx = x, ny = y;
+        const k = keysRef.current;
+        let nx = x, ny = y, ndir = dir;
 
-      if (k.w || k.arrowup) { ny -= SPEED; dir = "up"; }
-      if (k.s || k.arrowdown) { ny += SPEED; dir = "down"; }
-      if (k.a || k.arrowleft) { nx -= SPEED; dir = "left"; }
-      if (k.d || k.arrowright) { nx += SPEED; dir = "right"; }
+        if (k.w || k.arrowup)   { ny -= SPEED; ndir = "up"; }
+        if (k.s || k.arrowdown) { ny += SPEED; ndir = "down"; }
+        if (k.a || k.arrowleft) { nx -= SPEED; ndir = "left"; }
+        if (k.d || k.arrowright){ nx += SPEED; ndir = "right"; }
 
-      nx = Math.max(MIN_XY, Math.min(MAX_XY, nx));
-      ny = Math.max(MIN_XY, Math.min(MAX_XY, ny));
+        nx = Math.max(MIN_XY, Math.min(MAX_XY, nx));
+        ny = Math.max(MIN_XY, Math.min(MAX_XY, ny));
 
-      if (maskReady) {
-        if (nx !== x && isWalkable(nx, y)) x = nx;
-        if (ny !== y && isWalkable(x, ny)) y = ny;
-      } else {
-        x = nx; y = ny;
-      }
+        if (maskReady) {
+          if ((nx !== x) && isWalkable(nx, y)) x = nx;
+          if ((ny !== y) && isWalkable(x, ny)) y = ny;
+        } else { x = nx; y = ny; }
 
-      const changed = (x !== profile?.x) || (y !== profile?.y) || (dir !== profile?.dir);
-      if (!isAnonymous && uid && changed) {
-        sendMyPosition(x, y, dir);
+        const changed = (x !== myPosRef.current.x) || (y !== myPosRef.current.y) || (ndir !== myPosRef.current.dir);
+        if (changed) {
+          myPosRef.current = { x, y, dir: ndir };
+          sendMyPosition(x, y, ndir);
+        }
       }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [profile, maskReady, isAnonymous, uid, sendMyPosition]);
+  }, [maskReady, sendMyPosition]);
 
-  /* 6) 組合要渲染的人：優先用 players；若 players 沒有自己，fallback 用 profile 畫出自己 */
+  useEffect(() => {
+    localStorage.setItem(LS_RIGHT_COLLAPSE, rightCollapsed ? "1" : "0");
+  }, [rightCollapsed]);
+
+  // 渲染用的玩家清單：合併本地自己的座標
   const renderEntries = useMemo(() => {
-    const entries = Object.entries(players);
-    const hasMe = uid && players && players[uid];
-    if (!hasMe && uid && profile) {
-      // 用 profile 補上一筆「自己」
-      entries.push([uid, {
+    const out = Object.entries(players).map(([id, p]) => [id, { ...p }]);
+    if (uid) {
+      const me = players[uid] || {};
+      const mine = {
+        ...me,
         uid,
-        roleName: profile.roleName || "旅人",
-        avatar: profile.avatar || "bunny",
-        x: profile.x ?? 400,
-        y: profile.y ?? 300,
-        dir: profile.dir ?? "down",
-        bubble: profile.bubble || null,
-      }]);
+        roleName: (me.roleName ?? profile?.roleName ?? "旅人"),
+        avatar: me.avatar ?? profile?.avatar ?? "bunny",
+        x: myPosRef.current.x ?? me.x ?? 400,
+        y: myPosRef.current.y ?? me.y ?? 300,
+        dir: myPosRef.current.dir ?? me.dir ?? "down",
+        // 🔵 自己的燈號以 RTDB 連線狀態為準
+        online: isConnected ? true : !!me.online,
+      };
+      const idx = out.findIndex(([id]) => id === uid);
+      if (idx >= 0) out[idx][1] = mine; else out.push([uid, mine]);
     }
-    return entries;
-  }, [players, uid, profile]);
+    return out;
+  }, [players, uid, profile, isConnected]);
 
-  /* 7) 傳送到中央（看不到自己時用） */
-  const teleportToTopRight = useCallback(() => {
-  sendMyPosition(3900, 240, "left"); // 右上角固定座標，自己調整
-}, [sendMyPosition]);
-
-
-  const iDontSeeMyself = useMemo(() => {
-    return !!uid && !isAnonymous && !players?.[uid];
-  }, [players, uid, isAnonymous]);
+  const roster = useMemo(() => {
+    const arr = renderEntries.map(([id, p]) => ({
+      id,
+      roleName: p.roleName || "旅人",
+      avatar: p.avatar || "bunny",
+      online: !!p.online,
+    }));
+    arr.sort((a, b) => {
+      if (a.online !== b.online) return a.online ? -1 : 1;
+      const an = a.roleName.toLowerCase(), bn = b.roleName.toLowerCase();
+      if (an < bn) return -1; if (an > bn) return 1;
+      return a.id < b.id ? -1 : 1;
+    });
+    return arr;
+  }, [renderEntries]);
 
   return (
-  <>
-    {/* 看不到自己時，出現傳送按鈕 */}
-    {iDontSeeMyself && (
-      <div style={{
-        position: "fixed", left: 16, top: 16, zIndex: 220,
-        background: "rgba(254,252,232,.98)", border: "1px solid #f59e0b",
-        color: "#78350f", padding: "10px 12px", borderRadius: 12,
-        boxShadow: "0 8px 18px rgba(0,0,0,.12)"
-      }}>
-        <div style={{ fontWeight: 800, marginBottom: 6 }}>找不到你的角色？</div>
-        <div style={{ fontSize: 13, marginBottom: 8 }}>+         按下方按鈕把自己傳送到右上角。
-        </div>
-        <button
-         onClick={teleportToTopRight}
-          style={{
-            padding: "8px 12px", borderRadius: 10, border: "2px solid #1d4ed8",
-            background: "#fff", color: "#1d4ed8", fontWeight: 800, cursor: "pointer"
-          }}
-        >
--         傳送到中央
-+         傳送到右上角
-        </button>
-      </div>
-    )}
-
-      {/* 玩家們（包含 fallback 的自己） */}
+    <>
+      {/* 地圖上的玩家 */}
       <div style={{ position: "relative", zIndex: 20 }}>
         {renderEntries.map(([id, p]) => (
           <div
@@ -223,9 +227,9 @@ export default function Town() {
               pointerEvents: "none",
               zIndex: 20,
             }}
+            title={p.online ? "上線中" : "離線"}
           >
-            {/* 氣泡 */}
-            {p.bubble?.text && (
+            {(p.bubble?.text && (Date.now() - (Number(p.bubble?.ts)||0) <= BUBBLE_MS)) && (
               <div
                 style={{
                   transform: "translateY(-44px)",
@@ -244,8 +248,6 @@ export default function Town() {
                 {p.bubble.text}
               </div>
             )}
-
-            {/* 角色方塊（自己的加描邊） */}
             <div
               style={{
                 width: 40, height: 40, borderRadius: 12, background: "#fff",
@@ -258,14 +260,102 @@ export default function Town() {
                 {AVATAR_EMOJI[p.avatar || "bunny"] || "🙂"}
               </div>
             </div>
-
-            {/* 名稱（公開） */}
-            <div style={{ fontSize: 12, color: "#333", fontWeight: 600 }}>
-              {p.roleName || "旅人"}{id === uid ? " (你)" : ""}
+            <div
+              style={{
+                marginTop: 4,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 12,
+                color: "#333",
+                fontWeight: 600,
+              }}
+            >
+              <span
+                aria-label={p.online ? "上線中" : "離線"}
+                title={p.online ? "上線中" : "離線"}
+                style={{
+                  width: 8, height: 8, borderRadius: 999,
+                  background: p.online ? "#10b981" : "#bdbdbd",
+                  boxShadow: p.online ? "0 0 0 3px rgba(16,185,129,.18)" : "none",
+                }}
+              />
+              <span>{p.roleName || "旅人"}{id === uid ? " (你)" : ""}</span>
             </div>
           </div>
         ))}
       </div>
+
+      {/* 右側玩家清單（可收合） */}
+      <div
+        style={{
+          position: "fixed",
+          top: 16,
+          right: rightCollapsed ? -272 : 16,
+          width: 256,
+          maxHeight: "calc(100vh - 32px)",
+          background: "rgba(255,255,255,.95)",
+          border: "1px solid #eee",
+          borderRadius: 16,
+          boxShadow: "0 12px 28px rgba(0,0,0,.12)",
+          padding: 12,
+          zIndex: 90,
+          transition: "right .18s ease",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <div style={{ fontWeight: 800 }}>小鎮人數（{roster.length}）</div>
+          <div style={{ fontSize: 12, color: "#666" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 6 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 999, background: "#10b981" }} />
+              上線
+            </span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 999, background: "#bdbdbd" }} />
+              離線
+            </span>
+          </div>
+        </div>
+        <div style={{ overflow: "auto", maxHeight: "calc(100vh - 32px - 40px)" }}>
+          {roster.map((p) => (
+            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 4px", borderBottom: "1px dashed #f0f0f0" }}>
+              <div style={{ width: 28, height: 28, borderRadius: 10, background: "#fff", border: "1px solid #eee", display: "grid", placeItems: "center" }}>
+                <div style={{ fontSize: 18 }}>{AVATAR_EMOJI[p.avatar] || "🙂"}</div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
+                <span aria-label={p.online ? "上線中" : "離線"} title={p.online ? "上線中" : "離線"} style={{ width: 8, height: 8, borderRadius: 999, background: p.online ? "#10b981" : "#bdbdbd" }} />
+                <div style={{ fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {p.roleName || "旅人"}
+                </div>
+              </div>
+            </div>
+          ))}
+          {roster.length === 0 && (
+            <div style={{ color: "#666", fontSize: 12, padding: 8 }}>目前沒有玩家。</div>
+          )}
+        </div>
+      </div>
+
+      {/* 右側清單收合切換鈕 */}
+      <button
+        onClick={() => setRightCollapsed((v) => !v)}
+        title={rightCollapsed ? "展開玩家清單" : "收合玩家清單"}
+        style={{
+          position: "fixed",
+          top: 16,
+          right: rightCollapsed ? 16 : 288,
+          padding: "8px 10px",
+          borderRadius: 12,
+          border: "1px solid #ddd",
+          background: "#fff",
+          fontWeight: 800,
+          cursor: "pointer",
+          zIndex: 95,
+          transition: "right .18s ease",
+        }}
+      >
+        {rightCollapsed ? "玩家清單 ◀" : "玩家清單 ▶"}
+      </button>
     </>
   );
 }

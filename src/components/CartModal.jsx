@@ -1,22 +1,65 @@
+// src/components/CartModal.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { db, auth } from "../firebase.js";
-import { ref, push, set, serverTimestamp } from "firebase/database";
+import { ref, push, set } from "firebase/database";
 import { usePlayer } from "../store/playerContext.jsx";
 import { useCart } from "../store/useCart.js";
 
-const fmt = (n) => new Intl.NumberFormat("zh-TW").format(n || 0);
+const fmt1 = (n) =>
+  new Intl.NumberFormat("zh-TW", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(Number(n) || 0);
 
 export default function CartModal({ onClose }) {
   const { isAnonymous, openLoginGate, roleName, avatar, uid } = usePlayer();
-  const { items = [], reload, clearCart } = useCart();
+  const { items = [], reload } = useCart();
   const [placing, setPlacing] = useState(false);
 
   const total = useMemo(
-    () => items.reduce((s, x) => s + (Number(x.price)||0)*(Number(x.qty)||0), 0),
+    () => items.reduce((s, x) => s + (Number(x.price) || 0) * (Number(x.qty) || 0), 0),
     [items]
   );
 
-  const placeOrder = async () => {
+  // 數量調整
+  const changeQty = async (stallId, id, deltaOrValue) => {
+    try {
+      const me = auth.currentUser?.uid;
+      if (!me) return;
+      const key = `${stallId}|${id}`;
+      const prev = items.find((it) => it.stallId === stallId && it.id === id);
+      let nextQty =
+        typeof deltaOrValue === "number" && Math.abs(deltaOrValue) < 99
+          ? (Number(prev?.qty) || 0) + deltaOrValue
+          : Math.max(0, Number(deltaOrValue) || 0);
+
+      if (nextQty <= 0) {
+        await set(ref(db, `carts/${me}/items/${key}`), null);
+      } else {
+        await set(ref(db, `carts/${me}/items/${key}/qty`), nextQty);
+      }
+      await set(ref(db, `carts/${me}/updatedAt`), Date.now());
+      await reload?.();
+    } catch (e) {
+      console.error("[changeQty] failed", e);
+      alert("修改數量失敗，請稍後再試");
+    }
+  };
+
+  // 刪除
+  const removeItem = async (stallId, id) => {
+    try {
+      const me = auth.currentUser?.uid;
+      if (!me) return;
+      const key = `${stallId}|${id}`;
+      await set(ref(db, `carts/${me}/items/${key}`), null);
+      await set(ref(db, `carts/${me}/updatedAt`), Date.now());
+      await reload?.();
+    } catch (e) {
+      console.error("[removeItem] failed", e);
+      alert("刪除失敗，請稍後再試");
+    }
+  };
+
+  // 送單（用 Date.now()，不要 serverTimestamp）
+  const handleCheckout = async () => {
     if (placing || !items.length) return;
     if (isAnonymous) {
       openLoginGate({ mode: "upgrade", next: "checkout" });
@@ -25,25 +68,34 @@ export default function CartModal({ onClose }) {
     try {
       setPlacing(true);
       const orderRef = push(ref(db, "orders"));
+      const orderItems = items.map((it) => ({
+        stallId: it.stallId,
+        id: it.id,
+        name: it.name,
+        price: Number(it.price) || 0,
+        qty: Number(it.qty) || 0,
+      }));
       const payload = {
         uid,
-        orderedBy: { uid, roleName, avatar },
-        items: items.map(({ stallId, id, name, price, qty }) => ({ stallId, id, name, price, qty })),
+        orderedBy: {
+          uid,
+          roleName: roleName || "旅人",
+          avatar: ["bunny", "bear", "cat", "duck"].includes(avatar) ? avatar : "bunny",
+        },
+        items: orderItems,
         total,
         status: "submitted",
         paid: false,
         paidAt: null,
         last5: null,
-        createdAt: serverTimestamp(),
+        createdAt: Date.now(), // ✅ 規則要求 number
       };
       await set(orderRef, payload);
 
-      if (typeof clearCart === "function") {
-        await clearCart();
-      } else if (auth.currentUser?.uid) {
+      // 清空購物袋
+      if (auth.currentUser) {
         await set(ref(db, `carts/${auth.currentUser.uid}`), { items: {}, updatedAt: Date.now() });
       }
-
       await reload?.();
       onClose?.();
       alert("訂單已送出！");
@@ -55,51 +107,67 @@ export default function CartModal({ onClose }) {
     }
   };
 
+  // 登入成功 → 自動送單（若有 next=checkout）
   useEffect(() => {
-    const onOk = (e) => { if (e?.detail?.next === "checkout") placeOrder(); };
+    const onOk = (e) => {
+      if (e?.detail?.next === "checkout") handleCheckout();
+    };
     window.addEventListener("login-success", onOk);
     return () => window.removeEventListener("login-success", onOk);
   }, [items, total, uid, roleName, avatar, placing, isAnonymous]);
 
-  const handleCheckout = () => {
-    if (isAnonymous) {
-      openLoginGate({ mode: "upgrade", next: "checkout" });
-      return;
-    }
-    placeOrder();
-  };
-
   return (
-    <div role="dialog" aria-modal="true" onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.28)", display: "grid", placeItems: "center", zIndex: 160 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(880px, 96vw)", background: "#fff", borderRadius: 16, padding: 16, position: "relative" }}>
-        <button onClick={onClose} aria-label="關閉" style={{ position: "absolute", right: 8, top: 8, borderRadius: 999, width: 36, height: 36 }}>×</button>
+    <div onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "grid", placeItems: "center", zIndex: 160 }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ width: "min(980px,96vw)", background: "#fff", borderRadius: 16, border: "1px solid #eee", boxShadow: "0 20px 48px rgba(0,0,0,.2)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 14px", borderBottom: "1px solid #eee", background: "#f9fafb" }}>
+          <h3 style={{ margin: 0 }}>購物袋</h3>
+          <button onClick={onClose} aria-label="關閉" style={{ padding: "6px 10px", borderRadius: 10, border: "1px solid #ddd", background: "#fff" }}>×</button>
+        </div>
 
-        <h3 style={{ marginTop: 4, marginBottom: 12, fontWeight: 900 }}>購物袋</h3>
-
-        <div style={{ border: "1px solid #eee", borderRadius: 12, overflow: "hidden" }}>
+        <div style={{ padding: 16, overflow: "auto", maxHeight: "68vh" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead style={{ background: "#fafafa" }}>
               <tr>
-                <th style={{ textAlign: "left", padding: 8 }}>攤位</th>
+                <th style={{ textAlign: "left", padding: 8, width: 120 }}>攤位</th>
                 <th style={{ textAlign: "left", padding: 8 }}>品項</th>
                 <th style={{ textAlign: "right", padding: 8, width: 80 }}>單價</th>
-                <th style={{ textAlign: "right", padding: 8, width: 80 }}>數量</th>
+                <th style={{ textAlign: "center", padding: 8, width: 140 }}>數量</th>
                 <th style={{ textAlign: "right", padding: 8, width: 120 }}>小計</th>
+                <th style={{ textAlign: "center", padding: 8, width: 80 }}>操作</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 ? (
-                <tr><td colSpan="5" style={{ padding: 12, textAlign: "center", color: "#888" }}>購物袋是空的</td></tr>
+                <tr><td colSpan="6" style={{ padding: 12, textAlign: "center", color: "#888" }}>購物袋是空的</td></tr>
               ) : items.map((it) => {
-                const sub = (Number(it.price)||0) * (Number(it.qty)||0);
+                const sub = (Number(it.price) || 0) * (Number(it.qty) || 0);
                 return (
                   <tr key={`${it.stallId}|${it.id}`} style={{ borderTop: "1px solid #f0f0f0" }}>
                     <td style={{ padding: 8 }}>{it.stallId}</td>
                     <td style={{ padding: 8 }}>{it.name}</td>
-                    <td style={{ padding: 8, textAlign: "right" }}>{fmt(it.price)}</td>
-                    <td style={{ padding: 8, textAlign: "right" }}>{it.qty}</td>
-                    <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>{fmt(sub)}</td>
+                    <td style={{ padding: 8, textAlign: "right" }}>{fmt1(it.price)}</td>
+                    <td style={{ padding: 8, textAlign: "center" }}>
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        <button type="button" onClick={() => changeQty(it.stallId, it.id, -1)} className="small-btn">−</button>
+                        <input
+                          value={Number(it.qty) || 0}
+                          onChange={(e) => changeQty(it.stallId, it.id, e.target.value)}
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          style={{ width: 56, textAlign: "center", border: "1px solid #ddd", borderRadius: 8, padding: "6px 4px" }}
+                        />
+                        <button type="button" onClick={() => changeQty(it.stallId, it.id, +1)} className="small-btn">＋</button>
+                      </div>
+                    </td>
+                    <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>{fmt1(sub)}</td>
+                    <td style={{ padding: 8, textAlign: "center" }}>
+                      <button onClick={() => removeItem(it.stallId, it.id)}
+                        style={{ padding: "6px 10px", borderRadius: 10, border: "1px solid #ddd", background: "#fff", cursor: "pointer" }}>
+                        移除
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -107,19 +175,17 @@ export default function CartModal({ onClose }) {
           </table>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "0 16px 16px" }}>
           <div style={{ color: "#666" }}>共 {items.length} 項</div>
-          <div style={{ fontWeight: 900, fontSize: 18 }}>合計 NT$ {fmt(total)}</div>
+          <div style={{ fontWeight: 900, fontSize: 18 }}>合計 NT$ {fmt1(total)}</div>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "0 16px 16px" }}>
           <button onClick={onClose} style={{ padding: "10px 16px", borderRadius: 12 }}>關閉</button>
           <button
             onClick={handleCheckout}
             disabled={placing || items.length === 0}
-            style={{ padding: "10px 16px", borderRadius: 12, border: "2px solid #333", background: "#fff",
-                    fontWeight: 800, cursor: placing ? "not-allowed" : "pointer" }}
-            title={isAnonymous ? "請先登入 / 建立帳號再送單" : "送出訂單"}
+            style={{ padding: "10px 16px", borderRadius: 12, border: "2px solid #333", background: "#fff", fontWeight: 800, cursor: placing ? "not-allowed" : "pointer" }}
           >
             {placing ? "送出中…" : (isAnonymous ? "先登入再送單" : "送出訂單")}
           </button>

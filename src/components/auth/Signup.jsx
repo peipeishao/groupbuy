@@ -1,118 +1,188 @@
-import React, { useState } from "react";
-import {
-  browserLocalPersistence,
-  setPersistence,
-  createUserWithEmailAndPassword,
-  linkWithCredential,
-  EmailAuthProvider,
-} from "firebase/auth";
+// src/components/auth/Signup.jsx
+import React, { useEffect, useRef, useState } from "react";
 import { auth, db } from "../../firebase.js";
-import { ref as dbRef, update, get, set } from "firebase/database";
+import {
+  createUserWithEmailAndPassword,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence,
+} from "firebase/auth";
+import { ref, set as rtdbSet, update as rtdbUpdate } from "firebase/database";
+import { addRememberedAccount } from "../RememberedAccounts.jsx";
 
-// 帳號轉 email
-function toEmail(account) {
-  if (!account) return "";
-  return account.includes("@") ? account : `${account}@groupbuy.local`;
-}
+const LOCAL_DOMAIN = "groupbuy.local";
 
-// 驗證帳號（英數，對應 playersPrivate.username 規則）
-function isValidAccountId(s) {
-  return /^[A-Za-z0-9]+$/.test(s || "");
+// 將輸入強制轉為小寫英數，長度限制 3–20
+function normalizeUsername(input) {
+  const lower = String(input || "").toLowerCase();
+  const alnum = lower.replace(/[^a-z0-9]/g, "");
+  return alnum.slice(0, 20);
 }
 
 export default function Signup({ onClose, goLogin, resumeAction }) {
-  const [account, setAccount] = useState("");   // 只輸入前半（例：peishao）
-  const [realName, setRealName] = useState(""); // 必填
+  const [username, setUsername] = useState(""); // 小寫英數
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [remember, setRemember] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
 
-  const ensurePrivateProfile = async (uid, username, realName) => {
-    const priRef = dbRef(db, `playersPrivate/${uid}`);
-    const now = Date.now();
-    // 直接做一次更新（若不存在 PlayerProvider 也會建，但這裡先補真實姓名/帳號）
-    await update(priRef, {
-      uid,
-      username,        // 規則：英數
-      realName,        // 規則：字串即可
-      updatedAt: now,
-    });
-  };
+  const userRef = useRef(null);
+  useEffect(() => { setTimeout(() => userRef.current?.focus(), 0); }, []);
 
-  const onSubmit = async (e) => {
+  async function onSubmit(e) {
     e?.preventDefault?.();
-    if (!account || !password || !realName) {
-      return alert("請輸入帳號、密碼與真實姓名");
-    }
-    if (!isValidAccountId(account)) {
-      return alert("帳號僅能包含英文字母與數字");
-    }
+    setErr("");
 
-    const email = toEmail(account);
+    const u = normalizeUsername(username);
+    if (!u || u.length < 3) {
+      setErr("帳號需為英文小寫與數字，長度 3–20。");
+      return;
+    }
+    if (!password) { setErr("請設定密碼"); return; }
+    if (password !== confirm) { setErr("兩次密碼不一致"); return; }
+
+    const emailToUse = `${u}@${LOCAL_DOMAIN}`;
+
     setLoading(true);
     try {
-      await setPersistence(auth, browserLocalPersistence);
+      await setPersistence(auth, remember ? browserLocalPersistence : browserSessionPersistence);
+      const cred = await createUserWithEmailAndPassword(auth, emailToUse, password);
 
-      if (auth.currentUser?.isAnonymous) {
-        // 匿名升級（保留 uid，不需搬移 carts）
-        const cred = EmailAuthProvider.credential(email, password);
-        const { user } = await linkWithCredential(auth.currentUser, cred);
-        await ensurePrivateProfile(user.uid, account, realName);
-      } else {
-        // 非匿名直接建立新帳號（較少見）
-        const { user } = await createUserWithEmailAndPassword(auth, email, password);
-        await ensurePrivateProfile(user.uid, account, realName);
-      }
+      // playersPrivate：寫入小寫 username
+      try {
+        await rtdbSet(ref(db, `playersPrivate/${cred.user.uid}`), {
+          uid: cred.user.uid,
+          realName: "",
+          username: u,              // 小寫英數
+          updatedAt: Date.now(),
+        });
+      } catch {}
 
-      onClose?.();
+      // playersPublic：補上 roleName（預設用同一個 username）
+      try {
+        await rtdbUpdate(ref(db, `playersPublic/${cred.user.uid}`), {
+          roleName: u,
+          updatedAt: Date.now(),
+        });
+      } catch {}
+
+      // 快速登入清單（顯示用）
+      addRememberedAccount({
+        email: emailToUse,
+        display: u,
+        avatar: "🙂",
+      });
+
+      // 儲存瀏覽器 Credential（提升下次一鍵自動填入成功率）
+      try {
+        if ("credentials" in navigator && window.PasswordCredential) {
+          const c = new window.PasswordCredential({
+            id: emailToUse,
+            password,
+            name: u,
+          });
+          await navigator.credentials.store(c);
+        }
+      } catch {}
+
       resumeAction?.();
-    } catch (err) {
-      const code = err?.code || "";
-      if (code === "auth/email-already-in-use") {
-        alert("此帳號已被註冊，請改用登入。");
-      } else if (code === "auth/weak-password") {
-        alert("密碼至少 6 碼。");
-      } else {
-        alert(err.message || code);
-      }
+      onClose?.();
+    } catch (e) {
+      setErr(e?.message || "註冊失敗，請再試一次");
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   return (
-    <form onSubmit={onSubmit} style={panel}>
-      <h3 style={{marginTop:0}}>建立帳號</h3>
-      <input
-        placeholder="帳號（英數，將轉為 @groupbuy.local）"
-        value={account}
-        onChange={(e)=>setAccount(e.target.value)}
-        style={input}
-      />
-      <input
-        placeholder="真實姓名（下單會顯示）"
-        value={realName}
-        onChange={(e)=>setRealName(e.target.value)}
-        style={input}
-      />
-      <input
-        type="password"
-        placeholder="密碼（至少 6 碼）"
-        value={password}
-        onChange={(e)=>setPassword(e.target.value)}
-        style={input}
-      />
-      <div style={{ display:"flex", gap:8, marginTop:8 }}>
-        <button type="submit" disabled={loading} style={btnPrimary}>{loading ? "建立中…" : "建立帳號"}</button>
-        <button type="button" onClick={goLogin} style={btn}>改用登入</button>
-      </div>
-      <div style={{fontSize:12, color:"#666", marginTop:8}}>
-        實際建立 email：{account ? toEmail(account) : "（輸入帳號後顯示）"}
+    <form onSubmit={onSubmit}>
+      <div style={{ display: "grid", gap: 8 }}>
+        <label style={{ fontWeight: 800 }}>帳號（英文小寫）</label>
+        <input
+          ref={userRef}
+          type="text"
+          value={username}
+          onChange={(e) => setUsername(normalizeUsername(e.target.value))}
+          placeholder="例如：pizzawater（系統將建立 pizzawater@groupbuy.local）"
+          required
+          autoComplete="username"
+          style={input}
+        />
+
+        <label style={{ fontWeight: 800, marginTop: 8 }}>密碼</label>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="請設定密碼"
+          required
+          autoComplete="new-password"
+          style={input}
+        />
+
+        <label style={{ fontWeight: 800, marginTop: 8 }}>再次輸入密碼</label>
+        <input
+          type="password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          placeholder="請再次輸入密碼"
+          required
+          autoComplete="new-password"
+          style={input}
+        />
+
+        <div style={{ fontSize: 12, color: "#666" }}>
+          建立後可於「編輯角色」修改顯示名稱；登入仍使用帳號＋密碼。
+        </div>
+
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+          記住我（下次自動保持登入）
+        </label>
+
+        {err && <div style={{ color: "#b91c1c", fontSize: 12 }}>{err}</div>}
+
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            padding: "10px 14px",
+            borderRadius: 10,
+            border: "2px solid #22c55e",
+            background: loading ? "#ecfdf5" : "#fff",
+            color: "#16a34a",
+            fontWeight: 800,
+            cursor: loading ? "default" : "pointer",
+            marginTop: 8,
+          }}
+        >
+          {loading ? "建立中…" : "建立帳號"}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => goLogin?.()}
+          style={{
+            padding: "8px 12px",
+            borderRadius: 10,
+            border: "2px solid #333",
+            background: "#fff",
+            fontWeight: 800,
+            cursor: "pointer",
+          }}
+        >
+          我已有帳號，要登入
+        </button>
       </div>
     </form>
   );
 }
 
-const panel = { background:"#fff", border:"1px solid #eee", borderRadius:12, padding:16, width:360 };
-const input = { width:"100%", padding:"10px 12px", border:"1px solid #ddd", borderRadius:10, marginTop:8 };
-const btn = { padding:"10px 16px", border:"2px solid #333", borderRadius:12, background:"#fff", fontWeight:800, cursor:"pointer" };
-const btnPrimary = { ...btn, borderColor:"#16a34a", color:"#16a34a" };
+const input = {
+  padding: "10px 12px",
+  borderRadius: 10,
+  border: "1px solid #ddd",
+  background: "#fff",
+  width: "100%",
+};
