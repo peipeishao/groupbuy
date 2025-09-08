@@ -3,7 +3,7 @@ import { db, auth } from "../firebase.js";
 import { onValue, ref as dbRef, query, limitToLast, update } from "firebase/database";
 import { onAuthStateChanged } from "firebase/auth";
 import { usePlayer } from "../store/playerContext.jsx";
-import { ref as dbRef, update } from "firebase/database";
+import { ref as dbRef,  update as updateRtdb } from "firebase/database";
 
 
 const ntd1 = (n) =>
@@ -107,7 +107,8 @@ async function togglePaid(orderId, checked) {
       paid: !!checked,
       paidAt: checked ? Date.now() : null
     };
-    await update(dbRef(db, `orders/${orderId}`), patch);
+    await updateRtdb(dbRef(db, `playersPublic/${uid}`), { online: true });
+
   } catch (e) {
     console.error("[OrdersSummary] toggle paid failed:", e);
     alert("更新付款狀態失敗：" + (e?.message || "請稍後再試"));
