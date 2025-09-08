@@ -102,9 +102,9 @@ export default function HUD({ onOpenCart }) {
         >
           {/* 🛍️ 購物袋（圖片按鈕 + 徽章） */}
           <ImageButton
-            img="/public/buildings/button-normal.png"
-            imgHover="/public/buildings/button-light.png"
-            imgActive="/public/buildings/button-dark.png"
+            img="/buildings/button-normal.png"
+            imgHover="/buildings/button-light.png"
+            imgActive="/buildings/button-dark.png"
             label="購物袋"
             labelPos="center"
             labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }} 
@@ -118,9 +118,9 @@ export default function HUD({ onOpenCart }) {
           {/* 📜 訂購紀錄（登入者可見） */}
           {!isAnonymous && (
             <ImageButton
-              img="/public/buildings/button-normal.png"
-              imgHover="/public/buildings/button-light.png"
-              imgActive="/public/buildings/button-dark.png"
+              img="/buildings/button-normal.png"
+              imgHover="/buildings/button-light.png"
+              imgActive="/buildings/button-dark.png"
               label="訂購紀錄"
               labelPos="center"
               labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }} 
@@ -152,9 +152,9 @@ export default function HUD({ onOpenCart }) {
           {isAnonymous ? (
             <>
               <ImageButton
-                img="/public/buildings/button-normal.png"
-                imgHover="/public/buildings/button-light.png"
-                imgActive="/public/buildings/button-dark.png"
+                img="/buildings/button-normal.png"
+                imgHover="/buildings/button-light.png"
+                imgActive="/buildings/button-dark.png"
                 label="登入"
                 labelPos="center"
                 labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }} 
@@ -164,9 +164,9 @@ export default function HUD({ onOpenCart }) {
                 title="登入或建立帳號（升級匿名帳號，購物袋保留）"
               />
               <ImageButton
-                img="/public/buildings/button-normal.png"
-                imgHover="/public/buildings/button-light.png"
-                imgActive="/public/buildings/button-dark.png"
+                img="/buildings/button-normal.png"
+                imgHover="/buildings/button-light.png"
+                imgActive="/buildings/button-dark.png"
                 label="建立帳號"
                 labelPos="center"
                 labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }} 
@@ -185,9 +185,9 @@ export default function HUD({ onOpenCart }) {
             </>
           ) : (
             <ImageButton
-              img="/public/buildings/button-normal.png"
-              imgHover="/public/buildings/button-light.png"
-              imgActive="/public/buildings/button-dark.png"
+              img="/buildings/button-normal.png"
+              imgHover="/buildings/button-light.png"
+              imgActive="/buildings/button-dark.png"
               label="登出"
               labelPos="center"
               labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }} 
