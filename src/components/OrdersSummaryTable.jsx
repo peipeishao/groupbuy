@@ -3,6 +3,8 @@ import { db, auth } from "../firebase.js";
 import { onValue, ref as dbRef, query, limitToLast, update } from "firebase/database";
 import { onAuthStateChanged } from "firebase/auth";
 import { usePlayer } from "../store/playerContext.jsx";
+import { ref as dbRef, update } from "firebase/database";
+
 
 const ntd1 = (n) =>
   new Intl.NumberFormat("zh-TW", { style: "currency", currency: "TWD", minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(Number(n) || 0);
@@ -98,10 +100,19 @@ export default function OrdersSummaryTable() {
   }, [orders]);
 
   // 勾選已付款
-  const togglePaid = async (orderId, checked) => {
-    try { await update(dbRef(db, `orders/${orderId}`), { paid: !!checked, paidAt: checked ? Date.now() : null }); }
-    catch(e){ console.error("[OrdersSummary] toggle paid failed:", e); alert("更新付款狀態失敗，請稍後再試"); }
-  };
+  
+async function togglePaid(orderId, checked) {
+  try {
+    const patch = {
+      paid: !!checked,
+      paidAt: checked ? Date.now() : null
+    };
+    await update(dbRef(db, `orders/${orderId}`), patch);
+  } catch (e) {
+    console.error("[OrdersSummary] toggle paid failed:", e);
+    alert("更新付款狀態失敗：" + (e?.message || "請稍後再試"));
+  }
+}
 
   // 紅色倒數：日:時:分:秒
   const countdown = useMemo(() => {

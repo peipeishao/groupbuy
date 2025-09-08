@@ -1,147 +1,123 @@
 // src/components/ChatBox.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { db, auth } from "../firebase.js";
-import { ref, onValue, push, set, update } from "firebase/database";
+import { ref as dbRef, push, set, onValue, limitToLast, query } from "firebase/database";
 import { usePlayer } from "../store/playerContext.jsx";
 
 export default function ChatBox() {
-  const { uid, roleName = "旅人", openLoginGate } = usePlayer() || {};
-  const [text, setText] = useState("");
+  const { roleName, openLoginGate } = usePlayer() || {};
   const [list, setList] = useState([]);
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
   const boxRef = useRef(null);
 
-  // 訂閱全域聊天（取最後 50 則）
+  // 讀取最後 50 則訊息（需要登入，否則後端規則會擋）
   useEffect(() => {
-    const off = onValue(ref(db, "chat/global"), (snap) => {
-      const v = snap.val() || {};
-      const arr = Object.values(v);
-      arr.sort((a, b) => (a.ts || 0) - (b.ts || 0));
-      setList(arr.slice(-50));
-    });
+    const qRef = query(dbRef(db, "chat/global"), limitToLast(50));
+    const off = onValue(
+      qRef,
+      (snap) => {
+        const v = snap.val() || {};
+        const arr = Object.entries(v).map(([id, m]) => ({ id, ...(m || {}) }));
+        arr.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+        setList(arr);
+        // 捲到底
+        requestAnimationFrame(() => {
+          boxRef.current?.scrollTo({ top: boxRef.current.scrollHeight, behavior: "smooth" });
+        });
+      },
+      (e) => {
+        console.error("[ChatBox] read error:", e);
+      }
+    );
     return () => off();
   }, []);
 
-  // 捲到最底
-  useEffect(() => {
-    const el = boxRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [list]);
-
   const send = async () => {
-    const line = text.trim();
-    if (!line) return;
+    const t = String(text || "").trim();
+    if (!t) return;
 
-    const me = auth.currentUser;
-    if (!me) {
-      openLoginGate?.({ mode: "upgrade" });
+    // 必須登入（含匿名）。沒登入就打開 LoginGate，再讓使用者重試。
+    const u = auth.currentUser;
+    if (!u) {
+      openLoginGate?.();
       return;
     }
 
-    const now = Date.now();
-    try {
-      // 寫入聊天室
-      await push(ref(db, "chat/global"), {
-        uid: me.uid,
-        roleName,
-        text: line,
-        ts: now,
-      });
+    // 依規則：uid 必須等於 auth.uid；roleName 最長 20；text 長度 1~500
+    const msg = {
+      uid: u.uid,
+      roleName: String(roleName || "玩家").slice(0, 20),
+      text: t.slice(0, 500),
+      ts: Date.now(),
+    };
 
-      // 顯示頭頂氣泡（3 秒）
-      await update(ref(db, `playersPublic/${me.uid}`), {
-        bubble: { text: line.slice(0, 120), ts: now },
-        updatedAt: now,
-      });
+    setSending(true);
+    try {
+      const id = push(dbRef(db, "chat/global")).key;
+      await set(dbRef(db, `chat/global/${id}`), msg);
+
+      // 頭頂氣泡（大家都看得到）
+      await set(dbRef(db, `playersPublic/${u.uid}/bubble`), { text: msg.text, ts: msg.ts });
+      // 3 秒後清掉
       setTimeout(() => {
-        // 清空 bubble（可省略，因為前端也會用 ts 自動隱藏）
-        set(ref(db, `playersPublic/${me.uid}/bubble`), null);
-      }, 3500);
+        set(dbRef(db, `playersPublic/${u.uid}/bubble`), null).catch(() => {});
+      }, 3000);
 
       setText("");
+      // 捲到底
+      requestAnimationFrame(() => {
+        boxRef.current?.scrollTo({ top: boxRef.current.scrollHeight, behavior: "smooth" });
+      });
     } catch (e) {
-      console.error("[chat] send failed", e);
-      alert("訊息送出失敗，請稍後再試");
+      console.error("[ChatBox] write error:", e);
+      alert("傳送失敗：" + (e?.message || "請稍後再試"));
+    } finally {
+      setSending(false);
     }
   };
 
   const onKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      send();
+      if (!sending) send();
     }
   };
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        left: 12,
-        bottom: 12,
-        width: 360,
-        zIndex: 120,
-        background: "rgba(255,255,255,.98)",
-        border: "1px solid #eee",
-        borderRadius: 14,
-        boxShadow: "0 12px 28px rgba(0,0,0,.18)",
-        display: "flex",
-        flexDirection: "column",
-        overflow: "hidden",
-      }}
-    >
-      <div
-        style={{
-          height: 36,
-          display: "flex",
-          alignItems: "center",
-          padding: "0 10px",
-          borderBottom: "1px solid #eee",
-          background: "#f9fafb",
-          fontWeight: 800,
-        }}
-      >
-        小鎮聊天室
-      </div>
-
-      <div
-        ref={boxRef}
-        style={{
-          height: 220,
-          overflowY: "auto",
-          padding: 10,
-          display: "grid",
-          gap: 6,
-        }}
-      >
-        {list.map((m, i) => (
-          <div key={i} style={{ fontSize: 13, lineHeight: 1.4 }}>
-            <b>{m.roleName || "旅人"}</b>
+    <div style={wrap}>
+      <div ref={boxRef} style={listBox}>
+        {list.map((m) => (
+          <div key={m.id} style={{ marginBottom: 6 }}>
+            <b style={{ color: "#334155" }}>{m.roleName || "玩家"}</b>
             <span style={{ color: "#94a3b8", marginLeft: 6, fontSize: 12 }}>
-              {new Date(m.ts || 0).toLocaleTimeString()}
+              {m.ts ? new Date(m.ts).toLocaleTimeString() : ""}
             </span>
-            <div>{m.text}</div>
+            <div style={{ whiteSpace: "pre-wrap" }}>{m.text}</div>
           </div>
         ))}
-        {list.length === 0 && (
-          <div style={{ color: "#94a3b8" }}>還沒有訊息，來打招呼吧！</div>
-        )}
       </div>
 
-      <div style={{ borderTop: "1px solid #eee", padding: 8 }}>
+      <div style={inputRow}>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder="輸入訊息，按 Enter 送出（Shift+Enter 換行）"
           rows={2}
-          style={{
-            width: "100%",
-            resize: "none",
-            border: "1px solid #ddd",
-            borderRadius: 10,
-            padding: "8px 10px",
-          }}
+          style={ta}
         />
+        <button onClick={send} disabled={sending} style={btn}>
+          送出
+        </button>
       </div>
     </div>
   );
 }
+
+/* styles */
+const wrap = { width: 320, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,.08)" };
+const listBox = { height: 220, overflowY: "auto", padding: "10px 12px", borderBottom: "1px solid #e5e7eb" };
+const inputRow = { padding: 8, display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "end" };
+const ta = { width: "100%", resize: "none", padding: 8, border: "1px solid #e5e7eb", borderRadius: 8, fontFamily: "inherit" };
+const btn = { padding: "8px 12px", borderRadius: 10, border: "2px solid #111", background: "#fff", fontWeight: 900, cursor: "pointer" };
