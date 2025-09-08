@@ -18,7 +18,7 @@ export default function MarketTown() {
   const [pmOpen, setPmOpen] = useState(false);
 
   // 你的背景圖（滿版）
-  const BG_URL = "/public/bg-town.jpg"; // TODO: 改成你的背景圖原檔（請記下原圖解析度）
+  const BG_URL = "/bg-town.jpg"; // TODO: 改成你的背景圖原檔（請記下原圖解析度）
 
   // 門牌座標（以「原圖百分比」定錨，0~100；大小用 widthRel 相對原圖寬度）
   // 請依你的實際建築位置微調 xPct/yPct/widthRel
