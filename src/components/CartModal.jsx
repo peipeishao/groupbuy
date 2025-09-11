@@ -1,9 +1,10 @@
-// src/components/CartModal.jsx
+// src/components/CartModal.jsx — 去除重複 announce 版本
 import React, { useEffect, useMemo, useState } from "react";
 import { db, auth } from "../firebase.js";
-import { ref, push, set } from "firebase/database";
+import { ref, push, set, get } from "firebase/database"; // 仍需要 push/set/get 建立訂單與操作購物袋
 import { usePlayer } from "../store/playerContext.jsx";
 import { useCart } from "../store/useCart.js";
+import { announce } from "../utils/announce.js"; // ✅ 改用共用的 announce，避免重複宣告
 
 const fmt1 = (n) =>
   new Intl.NumberFormat("zh-TW", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(Number(n) || 0);
@@ -58,15 +59,24 @@ export default function CartModal({ onClose }) {
     }
   };
 
-  // 送單（用 Date.now()，不要 serverTimestamp）
+  // 送單
   const handleCheckout = async () => {
     if (placing || !items.length) return;
     if (isAnonymous) {
-      openLoginGate({ mode: "upgrade", next: "checkout" });
+      // 需登入後才能送單
+      openLoginGate({ to: "login", next: "checkout", resumeAction: () => handleCheckout() });
       return;
     }
     try {
       setPlacing(true);
+
+      // 讀取 realName（playersPrivate/{uid}/realName）
+      let realName = "";
+      try {
+        const snap = await get(ref(db, `playersPrivate/${uid}/realName`));
+        realName = String(snap.val() || "");
+      } catch {}
+
       const orderRef = push(ref(db, "orders"));
       const orderItems = items.map((it) => ({
         stallId: it.stallId,
@@ -81,6 +91,7 @@ export default function CartModal({ onClose }) {
           uid,
           roleName: roleName || "旅人",
           avatar: ["bunny", "bear", "cat", "duck"].includes(avatar) ? avatar : "bunny",
+          realName: realName || null, // ✅ 寫入真實姓名
         },
         items: orderItems,
         total,
@@ -88,9 +99,12 @@ export default function CartModal({ onClose }) {
         paid: false,
         paidAt: null,
         last5: null,
-        createdAt: Date.now(), // ✅ 規則要求 number
+        createdAt: Date.now(),
       };
       await set(orderRef, payload);
+
+      // 公告：OOO 送出訂單
+      await announce(`${realName || roleName || "有人"}送出了一筆訂單`);
 
       // 清空購物袋
       if (auth.currentUser) {
@@ -107,7 +121,7 @@ export default function CartModal({ onClose }) {
     }
   };
 
-  // 登入成功 → 自動送單（若有 next=checkout）
+  // 登入成功 → 自動送單（相容原先流程）
   useEffect(() => {
     const onOk = (e) => {
       if (e?.detail?.next === "checkout") handleCheckout();

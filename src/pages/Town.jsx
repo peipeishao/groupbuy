@@ -1,8 +1,9 @@
-// src/pages/Town.jsx
+// src/pages/Town.jsx — auth ready 後再訂閱 playersPublic 版
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { usePlayer } from "../store/playerContext.jsx";
 import { db, auth } from "../firebase.js";
 import { onValue, ref as dbRef, update } from "firebase/database";
+import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
 
 const SPEED = 4;
 const MIN_XY = 0;
@@ -58,14 +59,32 @@ export default function Town() {
     return brightness > 128 || a === 0;
   };
 
-  // 訂閱所有玩家
+  // ✅ 等到 auth 準備好（含匿名登入）之後才訂閱 playersPublic
   useEffect(() => {
-    const off = onValue(
-      dbRef(db, "playersPublic"),
-      (snap) => setPlayers(snap.val() || {}),
-      (err) => console.warn("[playersPublic] subscribe error:", err)
-    );
-    return () => off();
+    let offPlayers = () => {};
+    const unsubAuth = onAuthStateChanged(auth, async (u) => {
+      try {
+        if (!u) {
+          // 尚未登入 → 匿名登入；等下一次 onAuthStateChanged 觸發後再訂閱
+          await signInAnonymously(auth);
+          return;
+        }
+        // 已登入 → 開始訂閱（避免重複掛）
+        offPlayers();
+        offPlayers = onValue(
+          dbRef(db, "playersPublic"),
+          (snap) => setPlayers(snap.val() || {}),
+          (err) => console.warn("[playersPublic] subscribe error:", err)
+        );
+      } catch (e) {
+        console.error("[playersPublic] auth/subscription error:", e);
+      }
+    });
+
+    return () => {
+      try { offPlayers(); } catch {}
+      try { unsubAuth(); } catch {}
+    };
   }, []);
 
   // 鍵盤事件

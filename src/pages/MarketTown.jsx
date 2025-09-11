@@ -1,3 +1,4 @@
+<AnnouncementBar />
 // src/pages/MarketTown.jsx
 import React, { useRef, useState, useEffect } from "react";
 import Town from "./Town.jsx";
@@ -10,6 +11,8 @@ import LoginGate from "../components/LoginGate.jsx";
 import ProductManager from "../components/ProductManager.jsx";
 import FullBleedStage, { Pin, PlacardImageButton } from "../components/FullBleedStage.jsx";
 import StallModal from "../components/StallModal.jsx";
+import AnnouncementBar from "../components/AnnouncementBar.jsx"; // 或 "./components/AnnouncementBar.jsx"
+import { announce } from "../utils/announce.js";
 
 
 export default function MarketTown() {
@@ -29,6 +32,14 @@ export default function MarketTown() {
 
   const tableWrapRef = useRef(null);
   useEffect(() => {
+let fired = false;
+if (!fired) {
+fired = true;
+announce("歡迎旅人進入小鎮");
+}
+}, []);
+  useEffect(() => {
+    
     const onResize = () => {
       const el = tableWrapRef.current;
       if (!el) return;

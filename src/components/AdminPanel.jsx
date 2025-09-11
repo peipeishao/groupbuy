@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { db } from "../firebase.js";
 import { ref, push, onValue, update, remove } from "firebase/database";
 import { usePlayer } from "../store/playerContext.jsx";
+import AdminOrdersPanel from "./AdminOrdersPanel.jsx"; // ✅ 管理訂單分頁
 
 const STALL_PRESETS = [
   { id: "chicken", name: "雞胸肉" },
@@ -44,6 +45,22 @@ export default function AdminPanel() {
   const isAdmin = !!player?.isAdmin;
   const uid = player?.uid || "";
   const roleName = player?.roleName || "Admin";
+
+  // 🔀 分頁（商品 / 訂單）
+  const [tab, setTab] = useState("products"); // "products" | "orders"
+  const tabBtn = (k, label) => (
+    <button
+      onClick={() => setTab(k)}
+      style={{
+        padding: "8px 12px",
+        borderRadius: 10,
+        border: "1px solid #e5e7eb",
+        background: tab === k ? "#111827" : "#fff",
+        color: tab === k ? "#fff" : "#111827",
+        cursor: "pointer",
+      }}
+    >{label}</button>
+  );
 
   // 商品管理狀態
   const [products, setProducts] = useState([]);
@@ -190,7 +207,7 @@ export default function AdminPanel() {
     return (
       <div style={styles.wrap}>
         <div style={styles.card}>
-          <div style={styles.header}><div style={styles.title}>團長後台：管理商品</div></div>
+          <div style={styles.header}><div style={styles.title}>團長後台：管理中心</div></div>
           <div style={{ padding: 16 }}>
             <div style={styles.notice}>
               需要管理員權限才能使用此頁面。請確認你的帳號在 <code>admins/{{uid}}</code> 下為 <code>true</code>。
@@ -204,146 +221,164 @@ export default function AdminPanel() {
   return (
     <div style={styles.wrap}>
       <div style={styles.card}>
-        <div style={styles.header}><div style={styles.title}>團長後台：管理商品</div></div>
-
-        {/* ✅ 本次開團設定 */}
-        <div style={{ padding: 16, borderBottom: "1px solid #eee" }}>
-          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
-            <div style={{ fontWeight:900 }}>本次開團設定</div>
-            <span style={{ padding:"2px 8px", borderRadius:999, fontSize:12, fontWeight:900, background: statusMeta.color, color:"#fff" }}>
-              {statusMeta.label}
-            </span>
-          </div>
-
-          <div style={{ display:"grid", gap:10, gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))" }}>
-            <div>
-              <label style={styles.label}>收單時間</label>
-              <input
-                type="datetime-local"
-                value={toInput(campaign.closeAt)}
-                onChange={(e)=> setCampaign((s)=>({ ...s, closeAt: fromInput(e.target.value) }))}
-                style={styles.input}
-              />
-              <div style={{ fontSize:12, color:"#64748b", marginTop:4 }}>讓大家知道什麼時候截止收單</div>
-            </div>
-
-            <div>
-              <label style={styles.label}>發車狀態</label>
-              <select
-                value={campaign.status}
-                onChange={(e)=> setCampaign((s)=>({ ...s, status: e.target.value }))}
-                style={styles.input}
-              >
-                {STATUS_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-              <div style={{ fontSize:12, color:"#64748b", marginTop:4 }}>開團中（黃）／ 已發車（綠）／ 開團結束（灰）</div>
-            </div>
-
-            <div>
-              <label style={styles.label}>貨到時間</label>
-              <input
-                type="datetime-local"
-                value={toInput(campaign.arriveAt)}
-                onChange={(e)=> setCampaign((s)=>({ ...s, arriveAt: fromInput(e.target.value) }))}
-                style={styles.input}
-              />
-              <div style={{ fontSize:12, color:"#64748b", marginTop:4 }}>若未定，可留空</div>
-            </div>
-          </div>
-
-          <div style={{ marginTop:12 }}>
-            <button onClick={saveCampaign} disabled={savingCampaign} style={styles.primaryBtn}>
-              {savingCampaign ? "儲存中…" : "儲存本次開團設定"}
-            </button>
+        {/* 標題 + 分頁切換 */}
+        <div style={styles.header}>
+          <div style={styles.title}>團長後台：管理中心</div>
+          <div style={{ display:"flex", gap:8 }}>
+            {tabBtn("products", "管理商品")}
+            {tabBtn("orders", "管理訂單")}
           </div>
         </div>
 
-        {/* 商品表單 */}
-        <form onSubmit={onSubmit} style={styles.form}>
-          <div style={styles.row}>
-            <label style={styles.label}>商品名稱</label>
-            <input name="name" value={form.name} onChange={onChange} placeholder="例如：舒肥雞胸" required style={styles.input} />
-          </div>
-
-          <div style={styles.row2}>
-            <div style={{ flex: 1 }}>
-              <label style={styles.label}>原價</label>
-              <input name="original" type="number" min="0" step="0.1" value={form.original} onChange={onChange} placeholder="例如：80.0" required style={styles.input} />
-            </div>
-            <div style={{ width: 12 }} />
-            <div style={{ flex: 1 }}>
-              <label style={styles.label}>折扣價</label>
-              <input name="price" type="number" min="0.1" step="0.1" value={form.price} onChange={onChange} placeholder="例如：50.0" required style={styles.input} />
-            </div>
-          </div>
-
-          <div style={styles.row}>
-            <label style={styles.label}>分類 / 攤位</label>
-            {!useCustomCat ? (
-              <div style={{ display:"flex", gap:8 }}>
-                <select name="category" value={form.category} onChange={onChange} style={{ ...styles.input, width:"auto", minWidth: 220 }}>
-                  {selectOptions.map((o)=> <option key={o.id} value={o.id}>{o.name}（{o.id}）</option>)}
-                </select>
-                <button type="button" onClick={()=> setUseCustomCat(true)} style={styles.smallBtn}>自訂分類…</button>
+        {/* ───────────────── Products 分頁 ───────────────── */}
+        {tab === "products" && (
+          <>
+            {/* 本次開團設定 */}
+            <div style={{ padding: 16, borderBottom: "1px solid #eee" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
+                <div style={{ fontWeight:900 }}>本次開團設定</div>
+                <span style={{ padding:"2px 8px", borderRadius:999, fontSize:12, fontWeight:900, background: statusMeta.color, color:"#fff" }}>
+                  {statusMeta.label}
+                </span>
               </div>
-            ) : (
-              <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-                <input value={customCat} onChange={(e)=> setCustomCat(e.target.value)} placeholder="例如：newstall 或 my-shop" style={styles.input} />
-                <button type="button" onClick={()=> { setUseCustomCat(false); setCustomCat(""); }} style={styles.secondaryBtn}>取消自訂</button>
+
+              <div style={{ display:"grid", gap:10, gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))" }}>
+                <div>
+                  <label style={styles.label}>收單時間</label>
+                  <input
+                    type="datetime-local"
+                    value={toInput(campaign.closeAt)}
+                    onChange={(e)=> setCampaign((s)=>({ ...s, closeAt: fromInput(e.target.value) }))}
+                    style={styles.input}
+                  />
+                  <div style={{ fontSize:12, color:"#64748b", marginTop:4 }}>讓大家知道什麼時候截止收單</div>
+                </div>
+
+                <div>
+                  <label style={styles.label}>發車狀態</label>
+                  <select
+                    value={campaign.status}
+                    onChange={(e)=> setCampaign((s)=>({ ...s, status: e.target.value }))}
+                    style={styles.input}
+                  >
+                    {STATUS_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                  <div style={{ fontSize:12, color:"#64748b", marginTop:4 }}>開團中（黃）／ 已發車（綠）／ 開團結束（灰）</div>
+                </div>
+
+                <div>
+                  <label style={styles.label}>貨到時間</label>
+                  <input
+                    type="datetime-local"
+                    value={toInput(campaign.arriveAt)}
+                    onChange={(e)=> setCampaign((s)=>({ ...s, arriveAt: fromInput(e.target.value) }))}
+                    style={styles.input}
+                  />
+                  <div style={{ fontSize:12, color:"#64748b", marginTop:4 }}>若未定，可留空</div>
+                </div>
               </div>
-            )}
-            <div style={{ fontSize:12, color:"#64748b", marginTop:4 }}>
-              前台會以 <code>category === stallId</code> 自動篩選顯示
+
+              <div style={{ marginTop:12 }}>
+                <button onClick={saveCampaign} disabled={savingCampaign} style={styles.primaryBtn}>
+                  {savingCampaign ? "儲存中…" : "儲存本次開團設定"}
+                </button>
+              </div>
             </div>
-          </div>
 
-          <div style={styles.row}>
-            <label style={styles.label}>圖片網址（選填）</label>
-            <input name="imageUrl" value={form.imageUrl} onChange={onChange} placeholder="例如：https://..." style={styles.input} />
-          </div>
+            {/* 商品表單 */}
+            <form onSubmit={onSubmit} style={styles.form}>
+              <div style={styles.row}>
+                <label style={styles.label}>商品名稱</label>
+                <input name="name" value={form.name} onChange={onChange} placeholder="例如：舒肥雞胸" required style={styles.input} />
+              </div>
 
-          {err && <div style={styles.error}>{err}</div>}
+              <div style={styles.row2}>
+                <div style={{ flex: 1 }}>
+                  <label style={styles.label}>原價</label>
+                  <input name="original" type="number" min="0" step="0.1" value={form.original} onChange={onChange} placeholder="例如：80.0" required style={styles.input} />
+                </div>
+                <div style={{ width: 12 }} />
+                <div style={{ flex: 1 }}>
+                  <label style={styles.label}>折扣價</label>
+                  <input name="price" type="number" min="0.1" step="0.1" value={form.price} onChange={onChange} placeholder="例如：50.0" required style={styles.input} />
+                </div>
+              </div>
 
-          <div style={{ display:"flex", gap:8, marginTop:8 }}>
-            <button type="submit" disabled={loading} style={styles.primaryBtn}>{loading ? "處理中…" : editingId ? "更新商品" : "新增商品"}</button>
-            {editingId && (
-              <button type="button" onClick={()=>{ setEditingId(null); setForm({ name:"", original:"", price:"", category:"chicken", imageUrl:"" }); setUseCustomCat(false); setCustomCat(""); }} style={styles.secondaryBtn}>取消編輯</button>
-            )}
-          </div>
-        </form>
+              <div style={styles.row}>
+                <label style={styles.label}>分類 / 攤位</label>
+                {!useCustomCat ? (
+                  <div style={{ display:"flex", gap:8 }}>
+                    <select name="category" value={form.category} onChange={onChange} style={{ ...styles.input, width:"auto", minWidth: 220 }}>
+                      {selectOptions.map((o)=> <option key={o.id} value={o.id}>{o.name}（{o.id}）</option>)}
+                    </select>
+                    <button type="button" onClick={()=> setUseCustomCat(true)} style={styles.smallBtn}>自訂分類…</button>
+                  </div>
+                ) : (
+                  <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                    <input value={customCat} onChange={(e)=> setCustomCat(e.target.value)} placeholder="例如：newstall 或 my-shop" style={styles.input} />
+                    <button type="button" onClick={()=> { setUseCustomCat(false); setCustomCat(""); }} style={styles.secondaryBtn}>取消自訂</button>
+                  </div>
+                )}
+                <div style={{ fontSize:12, color:"#64748b", marginTop:4 }}>
+                  前台會以 <code>category === stallId</code> 自動篩選顯示
+                </div>
+              </div>
 
-        {/* 商品清單 */}
-        <div style={{ marginTop: 16 }}>
-          {products.length === 0 ? (
-            <div style={{ textAlign:"center", color:"#666", padding:16 }}>目前沒有任何商品，請新增。</div>
-          ) : (
-            <div style={{ display:"grid", gap:8 }}>
-              {products.map((p)=>(
-                <div key={p.id} style={styles.item}>
-                  <div style={{ display:"flex", alignItems:"center", gap:10, minWidth:0 }}>
-                    {p.imageUrl ? (
-                      <img src={p.imageUrl} alt={p.name} style={{ width:56,height:56,objectFit:"cover",borderRadius:8,border:"1px solid #eee" }} />
-                    ) : (
-                      <div style={{ width:56,height:56,borderRadius:8,border:"1px solid #eee",display:"grid",placeItems:"center",color:"#999" }}>無圖</div>
-                    )}
-                    <div style={{ minWidth:0 }}>
-                      <div style={{ fontWeight:800, whiteSpace:"nowrap", textOverflow:"ellipsis", overflow:"hidden" }}>{p.name}</div>
-                      <div style={{ fontSize:12, color:"#666" }}>
-                        分類：{p.category || "（未指定）"} ｜ {ntd1(p.price)}
-                        {p.original ? (<span style={{ marginLeft:6, textDecoration:"line-through", color:"#999" }}>{ntd1(p.original)}</span>) : null}
+              <div style={styles.row}>
+                <label style={styles.label}>圖片網址（選填）</label>
+                <input name="imageUrl" value={form.imageUrl} onChange={onChange} placeholder="例如：https://..." style={styles.input} />
+              </div>
+
+              {err && <div style={styles.error}>{err}</div>}
+
+              <div style={{ display:"flex", gap:8, marginTop:8 }}>
+                <button type="submit" disabled={loading} style={styles.primaryBtn}>{loading ? "處理中…" : editingId ? "更新商品" : "新增商品"}</button>
+                {editingId && (
+                  <button type="button" onClick={()=>{ setEditingId(null); setForm({ name:"", original:"", price:"", category:"chicken", imageUrl:"" }); setUseCustomCat(false); setCustomCat(""); }} style={styles.secondaryBtn}>取消編輯</button>
+                )}
+              </div>
+            </form>
+
+            {/* 商品清單 */}
+            <div style={{ marginTop: 16 }}>
+              {products.length === 0 ? (
+                <div style={{ textAlign:"center", color:"#666", padding:16 }}>目前沒有任何商品，請新增。</div>
+              ) : (
+                <div style={{ display:"grid", gap:8 }}>
+                  {products.map((p)=>(
+                    <div key={p.id} style={styles.item}>
+                      <div style={{ display:"flex", alignItems:"center", gap:10, minWidth:0 }}>
+                        {p.imageUrl ? (
+                          <img src={p.imageUrl} alt={p.name} style={{ width:56,height:56,objectFit:"cover",borderRadius:8,border:"1px solid #eee" }} />
+                        ) : (
+                          <div style={{ width:56,height:56,borderRadius:8,border:"1px solid #eee",display:"grid",placeItems:"center",color:"#999" }}>無圖</div>
+                        )}
+                        <div style={{ minWidth:0 }}>
+                          <div style={{ fontWeight:800, whiteSpace:"nowrap", textOverflow:"ellipsis", overflow:"hidden" }}>{p.name}</div>
+                          <div style={{ fontSize:12, color:"#666" }}>
+                            分類：{p.category || "（未指定）"} ｜ {ntd1(p.price)}
+                            {p.original ? (<span style={{ marginLeft:6, textDecoration:"line-through", color:"#999" }}>{ntd1(p.original)}</span>) : null}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display:"flex", gap:8 }}>
+                        <button onClick={()=> startEdit(p)} style={styles.smallBtn}>編輯</button>
+                        <button onClick={()=> onDelete(p.id)} style={styles.dangerBtn}>刪除</button>
                       </div>
                     </div>
-                  </div>
-                  <div style={{ display:"flex", gap:8 }}>
-                    <button onClick={()=> startEdit(p)} style={styles.smallBtn}>編輯</button>
-                    <button onClick={()=> onDelete(p.id)} style={styles.dangerBtn}>刪除</button>
-                  </div>
+                  ))}
                 </div>
-              ))}
+              )}
             </div>
-          )}
-        </div>
+          </>
+        )}
 
+        {/* ───────────────── Orders 分頁 ───────────────── */}
+        {tab === "orders" && (
+          <div style={{ padding: 8 }}>
+            <AdminOrdersPanel />
+          </div>
+        )}
       </div>
     </div>
   );
