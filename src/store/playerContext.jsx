@@ -50,6 +50,7 @@ export function PlayerProvider({ children }) {
   const publicOffRef = useRef(null);
   const privateOffRef = useRef(null);
   const adminOffRef = useRef(null);
+  const unloadOffRef = useRef(null); // ✅ beforeunload/pagehide 清理
 
   // ---- Presence / Profiles 安裝 ----
   async function installPresence(u) {
@@ -105,19 +106,23 @@ export function PlayerProvider({ children }) {
             updatedAt: Date.now(),
           });
         }
-      } catch (e) {
-        // 若規則不允許也沒關係
+      } catch {
+        // 規則拒絕也沒關係
       }
     }
 
-    // onDisconnect：自動離線
+    // ✅ onDisconnect：匿名 → remove；已登入帳號 → online:false
     try {
       if (disconnectRef.current) {
         await disconnectRef.current.cancel();
         disconnectRef.current = null;
       }
       const od = onDisconnect(pubRef);
-      await od.update({ online: false, updatedAt: Date.now() });
+      if (me.isAnonymous) {
+        await od.remove();
+      } else {
+        await od.update({ online: false, updatedAt: Date.now() });
+      }
       disconnectRef.current = od;
     } catch (e) {
       console.warn("[presence] onDisconnect failed (will retry on reconnect)", e);
@@ -145,10 +150,39 @@ export function PlayerProvider({ children }) {
             disconnectRef.current = null;
           }
           const od2 = onDisconnect(pubRef);
-          await od2.update({ online: false, updatedAt: Date.now() });
+          if (me.isAnonymous) {
+            await od2.remove();
+          } else {
+            await od2.update({ online: false, updatedAt: Date.now() });
+          }
           disconnectRef.current = od2;
         } catch {}
       });
+    } catch {}
+
+    // ✅ 瀏覽器層級保險：關頁/切分頁立即移除或標離線
+    try {
+      if (unloadOffRef.current) {
+        unloadOffRef.current(); // 移除舊監聽
+        unloadOffRef.current = null;
+      }
+      const offBeforeUnload = () => {
+        // 僅針對目前登入使用者
+        if (auth.currentUser?.uid !== me.uid) return;
+        try {
+          if (me.isAnonymous) {
+            remove(pubRef);
+          } else {
+            update(pubRef, { online: false, updatedAt: Date.now() });
+          }
+        } catch {}
+      };
+      window.addEventListener("pagehide", offBeforeUnload);
+      window.addEventListener("beforeunload", offBeforeUnload);
+      unloadOffRef.current = () => {
+        window.removeEventListener("pagehide", offBeforeUnload);
+        window.removeEventListener("beforeunload", offBeforeUnload);
+      };
     } catch {}
   }
 
@@ -186,15 +220,17 @@ export function PlayerProvider({ children }) {
         else await markOfflineOnly();
       }
     } finally {
-      // 關閉所有訂閱
+      // 關閉所有訂閱與事件監聽
       try { connectedOffRef.current?.(); } catch {}
       try { publicOffRef.current?.(); } catch {}
       try { privateOffRef.current?.(); } catch {}
       try { adminOffRef.current?.(); } catch {}
+      try { unloadOffRef.current?.(); } catch {}
       connectedOffRef.current = null;
       publicOffRef.current = null;
       privateOffRef.current = null;
       adminOffRef.current = null;
+      unloadOffRef.current = null;
       disconnectRef.current = null;
       setIsConnected(false);
 
@@ -246,7 +282,7 @@ export function PlayerProvider({ children }) {
         publicOffRef.current = onValue(pubRef, (s) => {
           setPublicProfile(s.val() || null);
         });
-      } catch (_) {
+      } catch {
         setPublicProfile(null);
       }
 

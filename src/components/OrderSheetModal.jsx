@@ -1,14 +1,13 @@
-// src/components/OrderSheetModal.jsx
+// src/components/OrderSheetModal.jsx — 單一卷軸 + 加入購物車移到下方
 import React, { useEffect, useMemo, useState } from "react";
 import { db, auth } from "../firebase.js";
 import { ref, set, onValue } from "firebase/database";
 import { usePlayer } from "../store/playerContext.jsx";
 import { useCart } from "../store/useCart.js";
 import ReviewModal from "./reviews/ReviewModal.jsx";
-import { ref as dbRef } from "firebase/database"; // 只為了 useReviewStats 用別名
+import { ref as dbRef } from "firebase/database"; // for useReviewStats
 
 const fmt = (n) => new Intl.NumberFormat("zh-TW").format(n || 0);
-// 折扣價用：固定 1 位小數
 const fmt1 = (n) =>
   new Intl.NumberFormat("zh-TW", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(n || 0);
 
@@ -29,16 +28,11 @@ function useReviewStats(itemId) {
   return stats;
 }
 
-/** 商品卡（抽成子元件以符合 React hooks 規則） */
+/** 商品卡 */
 function ProductCard({ p, q, onDec, onInc, onInput, onOpenReview }) {
   const stats = useReviewStats(p.id);
-
   return (
-    <div
-      key={p.id}
-      className="card"
-      style={{ padding: 10, borderRadius: 12, border: "1px solid #eee" }}
-    >
+    <div className="card" style={{ padding: 10, borderRadius: 12, border: "1px solid #eee" }}>
       {p.img ? (
         <img
           src={p.img}
@@ -62,14 +56,7 @@ function ProductCard({ p, q, onDec, onInc, onInput, onOpenReview }) {
         </div>
       )}
 
-      <div
-        style={{
-          fontWeight: 700,
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}
-      >
+      <div style={{ fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
         {p.name}
       </div>
 
@@ -77,9 +64,7 @@ function ProductCard({ p, q, onDec, onInc, onInput, onOpenReview }) {
       <div style={{ margin: "6px 0" }}>
         價格：🪙 {fmt1(p.price)}
         {typeof p.original === "number" && p.original > p.price && (
-          <span style={{ marginLeft: 6, color: "#64748b", textDecoration: "line-through" }}>
-            {fmt(p.original)}
-          </span>
+          <span style={{ marginLeft: 6, color: "#64748b", textDecoration: "line-through" }}>{fmt(p.original)}</span>
         )}
         {p.unit && <span style={{ marginLeft: 6, color: "#64748b" }}>／{p.unit}</span>}
       </div>
@@ -93,7 +78,7 @@ function ProductCard({ p, q, onDec, onInc, onInput, onOpenReview }) {
         <button onClick={onOpenReview} style={linkBtn}>查看 / 撰寫評論</button>
       </div>
 
-      {/* 數量控制 */}
+      {/* 數量控制（先在上半部選好，再到下方一次加入） */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
         <button type="button" onClick={onDec} className="small-btn">−</button>
         <input
@@ -114,39 +99,46 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
   const { items: cartAll = [], reload } = useCart();
 
   // ❶ 可選商品（依序讀：stalls → products/{stallId} → products）
-  const [available, setAvailable] = useState([]); // [{id,name,price,original?,img?,unit?}]
+  const [available, setAvailable] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sourceLabel, setSourceLabel] = useState("");
 
-  // ❷ 本攤位的購物袋內容（下半部表格）
-  const cartItems = useMemo(
-    () => (stallId ? cartAll.filter((it) => it.stallId === stallId) : cartAll),
-    [cartAll, stallId]
-  );
+  // ❷ 本攤位的購物袋內容（直接訂閱 carts/{uid}/items）
+  const [stallCart, setStallCart] = useState([]);
+  useEffect(() => {
+    if (!open || !stallId) { setStallCart([]); return; }
+    if (!auth.currentUser) {
+      setStallCart(cartAll.filter((it) => String(it.stallId) === String(stallId)));
+      return;
+    }
+    const me = auth.currentUser.uid;
+    const off = onValue(ref(db, `carts/${me}/items`), (snap) => {
+      const v = snap.val() || {};
+      const arr = Object.values(v).filter((it) => String(it.stallId) === String(stallId));
+      setStallCart(arr);
+    }, (err) => {
+      console.warn("[OrderSheet] stallCart subscribe error:", err);
+      setStallCart(cartAll.filter((it) => String(it.stallId) === String(stallId)));
+    });
+    return () => { try { off(); } catch {} };
+  }, [open, stallId, cartAll]);
+
   const total = useMemo(
-    () => cartItems.reduce((s, x) => s + (Number(x.price) || 0) * (Number(x.qty) || 0), 0),
-    [cartItems]
+    () => stallCart.reduce((s, x) => s + (Number(x.price) || 0) * (Number(x.qty) || 0), 0),
+    [stallCart]
   );
 
   // ❸ 上半部選擇用：每個商品的「待加入數量」
-  const [sel, setSel] = useState({}); // { [itemId]: qty }
+  const [sel, setSel] = useState({});
   const selTotalQty = useMemo(
     () => Object.values(sel).reduce((s, n) => s + (Number(n) || 0), 0),
     [sel]
   );
-  const inc = (id, d) =>
-    setSel((m) => {
-      const next = Math.max(0, (Number(m[id]) || 0) + d);
-      return { ...m, [id]: next };
-    });
-  const setQty = (id, v) =>
-    setSel((m) => {
-      const n = Math.max(0, Number(v) || 0);
-      return { ...m, [id]: n };
-    });
+  const inc = (id, d) => setSel((m) => ({ ...m, [id]: Math.max(0, (Number(m[id]) || 0) + d) }));
+  const setQty = (id, v) => setSel((m) => ({ ...m, [id]: Math.max(0, Number(v) || 0) }));
 
   // ✅ 評論視窗控制
-  const [reviewItem, setReviewItem] = useState(null); // { id, name }
+  const [reviewItem, setReviewItem] = useState(null);
 
   // 讀取可選商品（三段 fallback）
   useEffect(() => {
@@ -154,7 +146,7 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
     let off1 = null, off2 = null, off3 = null;
     setLoading(true);
     setSourceLabel("");
-    setSel({}); // 每次打開重置選擇數量
+    setSel({});
 
     const useProductsFlat = () => {
       if (off3) return;
@@ -165,12 +157,8 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
           const v = snap.val();
           if (v && typeof v === "object") {
             const list = Object.entries(v).map(([id, p]) => {
-              const price =
-                p?.price != null ? Number(p.price) :
-                p?.priceGroup != null ? Number(p.priceGroup) : 0;
-              const original =
-                p?.original != null ? Number(p.original) :
-                p?.priceOriginal != null ? Number(p.priceOriginal) : undefined;
+              const price = p?.price != null ? Number(p.price) : p?.priceGroup != null ? Number(p.priceGroup) : 0;
+              const original = p?.original != null ? Number(p.original) : p?.priceOriginal != null ? Number(p.priceOriginal) : undefined;
               return {
                 id,
                 name: String(p?.name ?? ""),
@@ -183,12 +171,9 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
                 createdAt: Number(p?.createdAt ?? 0),
               };
             });
-
-            // ✅ 嚴格依據 stallId 過濾；若無符合就顯示空清單
             const filtered = list
               .filter((it) => it.active && it.price > 0 && (!stallId || it.category === String(stallId)))
               .sort((a, b) => (b.createdAt - a.createdAt) || String(a.name).localeCompare(String(b.name)));
-
             setAvailable(filtered.map(({ active, createdAt, category, ...it }) => it));
             setSourceLabel("products");
           } else {
@@ -197,11 +182,7 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
           }
           setLoading(false);
         },
-        () => {
-          setAvailable([]);
-          setSourceLabel("none");
-          setLoading(false);
-        }
+        () => { setAvailable([]); setSourceLabel("none"); setLoading(false); }
       );
     };
 
@@ -215,12 +196,8 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
           if (v && typeof v === "object") {
             const list = Object.entries(v)
               .map(([id, p]) => {
-                const price =
-                  p?.priceGroup != null ? Number(p.priceGroup) :
-                  p?.price != null ? Number(p.price) : 0;
-                const original =
-                  p?.priceOriginal != null ? Number(p.priceOriginal) :
-                  p?.original != null ? Number(p.original) : undefined;
+                const price = p?.priceGroup != null ? Number(p.priceGroup) : p?.price != null ? Number(p.price) : 0;
+                const original = p?.priceOriginal != null ? Number(p.priceOriginal) : p?.original != null ? Number(p.original) : undefined;
                 return {
                   id,
                   name: String(p?.name ?? ""),
@@ -234,7 +211,6 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
               })
               .filter((it) => it.active && it.price > 0)
               .sort((a, b) => (b.createdAt - a.createdAt) || String(a.name).localeCompare(String(b.name)));
-
             setAvailable(list.map(({ active, createdAt, ...it }) => it));
             setSourceLabel("products/{stallId}");
             setLoading(false);
@@ -283,7 +259,7 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
     };
   }, [open, stallId]);
 
-  // 把「上半部選好的數量」一次加入購物袋
+  // 把「上半部選好的數量」一次加入購物袋（改為在底部按鈕觸發）
   const addSelectedToCart = async () => {
     try {
       const me = auth.currentUser?.uid;
@@ -291,7 +267,6 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
         openLoginGate?.({ mode: "upgrade" });
         return;
       }
-
       const tasks = [];
       const now = Date.now();
 
@@ -300,7 +275,7 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
         if (q <= 0) continue;
 
         const key = `${stallId}|${it.id}`;
-        const prev = cartItems.find((x) => x.stallId === stallId && x.id === it.id);
+        const prev = stallCart.find((x) => x.stallId === stallId && x.id === it.id);
         const nextQty = (Number(prev?.qty) || 0) + q;
 
         tasks.push(
@@ -313,7 +288,6 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
           })
         );
       }
-
       if (tasks.length === 0) return;
 
       tasks.push(set(ref(db, `carts/${me}/updatedAt`), now));
@@ -351,7 +325,7 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
           border: "1px solid #eee",
           boxShadow: "0 20px 48px rgba(0,0,0,.2)",
           display: "grid",
-          gridTemplateRows: "56px auto auto",
+          gridTemplateRows: "56px 1fr auto", // 標題 +（單一可滾動內容）+ 底部
           maxHeight: "88vh",
           overflow: "hidden",
         }}
@@ -370,136 +344,116 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
           <h3 style={{ margin: 0 }}>
             攤位：{stallId || "全部"}　|　購物清單
           </h3>
-          <button
-            onClick={onClose}
-            aria-label="關閉"
-            style={{
-              padding: "6px 10px",
-              borderRadius: 10,
-              border: "1px solid #ddd",
-              background: "#fff",
-            }}
-          >
-            ×
-          </button>
         </div>
 
-        {/* ❶ 可選商品 + 「加入購物車」按鈕（無送單） */}
-        <div style={{ padding: 14, borderBottom: "1px solid #f0f0f0", overflow: "auto" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "baseline",
-              justifyContent: "space-between",
-              marginBottom: 8,
-              gap: 12,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-              <div style={{ fontWeight: 800 }}>可選商品</div>
-              {sourceLabel && (
-                <div style={{ fontSize: 12, color: "#64748b" }}>
-                  來源：<code>{sourceLabel}</code>
-                </div>
-              )}
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {/* 單一可滾動內容（包含 ❶ 與 ❷） */}
+        <div style={{ overflow: "auto", minHeight: 0 }}>
+          {/* ❶ 可選商品（移除原本上方的加入購物車按鈕） */}
+          <section style={{ padding: 14, borderBottom: "1px solid #f0f0f0" }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8, gap: 12 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                <div style={{ fontWeight: 800 }}>可選商品</div>
+                {sourceLabel && (
+                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                    來源：<code>{sourceLabel}</code>
+                  </div>
+                )}
+              </div>
               <div style={{ fontSize: 12, color: "#475569" }}>
                 已選 <b>{selTotalQty}</b> 件
               </div>
-              <button
-                onClick={addSelectedToCart}
-                disabled={loading || selTotalQty <= 0}
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: 10,
-                  border: "2px solid #111",
-                  background: "#fff",
-                  fontWeight: 800,
-                  cursor: selTotalQty > 0 ? "pointer" : "not-allowed",
-                }}
-                title="把上面選擇的數量一次加入購物袋"
-              >
-                加入購物車
-              </button>
             </div>
-          </div>
 
-          {loading ? (
-            <div style={{ color: "#64748b", padding: 8 }}>載入中…</div>
-          ) : available.length === 0 ? (
-            <div style={{ color: "#64748b", padding: 8 }}>這個攤位目前沒有商品</div>
-          ) : (
-            <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fill, minmax(200px,1fr))" }}>
-              {available.map((p) => {
-                const q = Number(sel[p.id]) || 0;
-                return (
-                  <ProductCard
-                    key={p.id}
-                    p={p}
-                    q={q}
-                    onDec={() => inc(p.id, -1)}
-                    onInc={() => inc(p.id, +1)}
-                    onInput={(e) => setQty(p.id, e.target.value)}
-                    onOpenReview={() => setReviewItem({ id: p.id, name: p.name })}
-                  />
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* ❷ 已加入購物袋（原表格） */}
-        <div style={{ padding: 16, overflow: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead style={{ background: "#fafafa" }}>
-              <tr>
-                <th style={{ textAlign: "left", padding: 8 }}>品項</th>
-                <th style={{ textAlign: "right", padding: 8, width: 80 }}>單價</th>
-                <th style={{ textAlign: "right", padding: 8, width: 80 }}>數量</th>
-                <th style={{ textAlign: "right", padding: 8, width: 120 }}>小計</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cartItems.length === 0 ? (
-                <tr>
-                  <td colSpan="4" style={{ padding: 12, textAlign: "center", color: "#888" }}>
-                    這個攤位的購物袋目前沒有品項
-                  </td>
-                </tr>
-              ) : (
-                cartItems.map((it) => {
-                  const sub = (Number(it.price) || 0) * (Number(it.qty) || 0);
+            {loading ? (
+              <div style={{ color: "#64748b", padding: 8 }}>載入中…</div>
+            ) : available.length === 0 ? (
+              <div style={{ color: "#64748b", padding: 8 }}>這個攤位目前沒有商品</div>
+            ) : (
+              <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fill, minmax(200px,1fr))" }}>
+                {available.map((p) => {
+                  const q = Number(sel[p.id]) || 0;
                   return (
-                    <tr key={`${it.stallId}|${it.id}`} style={{ borderTop: "1px solid #f0f0f0" }}>
-                      <td style={{ padding: 8 }}>{it.name}</td>
-                      <td style={{ padding: 8, textAlign: "right" }}>{fmt1(it.price)}</td>
-                      <td style={{ padding: 8, textAlign: "right" }}>{it.qty}</td>
-                      <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>{fmt1(sub)}</td>
-                    </tr>
+                    <ProductCard
+                      key={p.id}
+                      p={p}
+                      q={q}
+                      onDec={() => inc(p.id, -1)}
+                      onInc={() => inc(p.id, +1)}
+                      onInput={(e) => setQty(p.id, e.target.value)}
+                      onOpenReview={() => setReviewItem({ id: p.id, name: p.name })}
+                    />
                   );
-                })
-              )}
-            </tbody>
-          </table>
+                })}
+              </div>
+            )}
+          </section>
+
+          {/* ❷ 已加入購物袋（以 stallCart 為準） */}
+          <section style={{ padding: 16 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead style={{ background: "#fafafa" }}>
+                <tr>
+                  <th style={{ textAlign: "left", padding: 8 }}>品項</th>
+                  <th style={{ textAlign: "right", padding: 8, width: 80 }}>單價</th>
+                  <th style={{ textAlign: "right", padding: 8, width: 80 }}>數量</th>
+                  <th style={{ textAlign: "right", padding: 8, width: 120 }}>小計</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stallCart.length === 0 ? (
+                  <tr>
+                    <td colSpan="4" style={{ padding: 12, textAlign: "center", color: "#888" }}>
+                      這個攤位的購物袋目前沒有品項
+                    </td>
+                  </tr>
+                ) : (
+                  stallCart.map((it) => {
+                    const sub = (Number(it.price) || 0) * (Number(it.qty) || 0);
+                    return (
+                      <tr key={`${it.stallId}|${it.id}`} style={{ borderTop: "1px solid #f0f0f0" }}>
+                        <td style={{ padding: 8 }}>{it.name}</td>
+                        <td style={{ padding: 8, textAlign: "right" }}>{fmt1(it.price)}</td>
+                        <td style={{ padding: 8, textAlign: "right" }}>{it.qty}</td>
+                        <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>{fmt1(sub)}</td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+            <div style={{ textAlign: "right", marginTop: 8, color: "#111", fontWeight: 800 }}>
+              合計 NT$ {fmt1(total)}
+            </div>
+          </section>
         </div>
 
-        {/* 底部只留關閉 */}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "0 16px 16px" }}>
+        {/* 底部動作列：加入購物車（在左）＋ 關閉（在右） */}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "10px 16px 16px" }}>
+          <button
+            onClick={addSelectedToCart}
+            disabled={loading || selTotalQty <= 0}
+            style={{
+              padding: "10px 16px",
+              borderRadius: 12,
+              border: "2px solid #111",
+              background: "#fff",
+              fontWeight: 800,
+              cursor: selTotalQty > 0 ? "pointer" : "not-allowed",
+            }}
+            title={selTotalQty > 0 ? `加入 ${selTotalQty} 件到購物袋` : "請先在上方選擇數量"}
+          >
+            加入購物車
+          </button>
+
           <button onClick={onClose} style={{ padding: "10px 16px", borderRadius: 12 }}>
             關閉
           </button>
         </div>
       </div>
 
-      {/* ✅ 評論視窗（查看所有評論／新增自己的評論） */}
+      {/* ✅ 評論視窗 */}
       {reviewItem && (
-        <ReviewModal
-          open
-          itemId={reviewItem.id}
-          itemName={reviewItem.name}
-          onClose={() => setReviewItem(null)}
-        />
+        <ReviewModal open itemId={reviewItem.id} itemName={reviewItem.name} onClose={() => setReviewItem(null)} />
       )}
     </div>
   );

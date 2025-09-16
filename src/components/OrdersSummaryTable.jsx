@@ -31,7 +31,7 @@ const STATUS_META = {
 };
 
 export default function OrdersSummaryTable() {
-  const { uid: meUid } = usePlayer() || {};
+  const { isAdmin } = usePlayer() || {};
   const [orders, setOrders] = useState([]); // [{ id, createdAt, orderedBy, items[], total, paid, last5 }]
   const [err, setErr] = useState("");
 
@@ -170,15 +170,15 @@ export default function OrdersSummaryTable() {
     }));
   }, [orders]);
 
-  // 勾/取消「已付款」：只更新 paid / paidAt
+  // 勾/取消「已付款」：只 admin 可寫；更新 paid / paidAt / paidBy
   const togglePaid = async (orderId, currentChecked) => {
+    if (!isAdmin) return; // UI 雙保險
     const nextPaid = !currentChecked;
     try {
       await rtdbUpdate(rtdbRef(db, `orders/${orderId}`), {
         paid: nextPaid,
         paidAt: nextPaid ? Date.now() : null,
-        // 如需記錄誰勾的：請先於 RTDB 規則加入 paidBy 驗證後再解開
-        // paidBy: nextPaid ? meUid || null : null,
+        paidBy: nextPaid ? auth.currentUser?.uid || null : null,
       });
     } catch (e) {
       console.error("[OrdersSummary] update paid failed:", e);
@@ -329,18 +329,19 @@ export default function OrdersSummaryTable() {
                     </td>
                     <td style={tdR}>{ntd1(o.total)}</td>
                     <td style={tdC}>
-                      <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        <input
-                          type="checkbox"
-                          checked={!!o.paid}
-                          onChange={() => togglePaid(o.id, !!o.paid)}
-                        />
-                        <span style={{ fontSize: 12, color: "#666" }}>
-                          {o.paid && o.paidAt
-                            ? new Date(o.paidAt).toLocaleString("zh-TW")
-                            : ""}
-                        </span>
-                      </label>
+                      <input
+                        type="checkbox"
+                        checked={!!o.paid}
+                        disabled={!isAdmin}
+                        onChange={() => togglePaid(o.id, o.paid)}
+                        title={isAdmin ? "核對付款狀態" : "只有管理員可以變更"}
+                        style={{ cursor: isAdmin ? "pointer" : "not-allowed" }}
+                      />
+                      {o.paid && (
+                        <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
+                          {o.paidAt ? new Date(o.paidAt).toLocaleString() : ""}
+                        </div>
+                      )}
                     </td>
                     <td style={tdC}>{o.last5 || "-"}</td>
                   </tr>
