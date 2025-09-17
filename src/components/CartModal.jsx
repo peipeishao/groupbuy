@@ -90,7 +90,8 @@ export default function CartModal({ onClose }) {
         orderedBy: {
           uid,
           roleName: roleName || "旅人",
-          avatar: ["bunny", "bear", "cat", "duck"].includes(avatar) ? avatar : "bunny",
+          avatar: myAvatar,
+          avatarUrl: myAvatarUrl || null,
           realName: realName || null, // ✅ 寫入真實姓名
         },
         items: orderItems,

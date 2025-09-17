@@ -203,6 +203,8 @@ export default function Town() {
         uid,
         roleName: (me.roleName ?? profile?.roleName ?? "旅人"),
         avatar: me.avatar ?? profile?.avatar ?? "bunny",
+        // ✅ 自訂頭像網址（若 RTDB 還沒同步，用 profile 補上）
+        avatarUrl: me.avatarUrl ?? profile?.avatarUrl ?? null,
         x: myPosRef.current.x ?? me.x ?? 400,
         y: myPosRef.current.y ?? me.y ?? 300,
         dir: myPosRef.current.dir ?? me.dir ?? "down",
@@ -220,6 +222,7 @@ export default function Town() {
       id,
       roleName: p.roleName || "旅人",
       avatar: p.avatar || "bunny",
+      avatarUrl: p.avatarUrl || "", // ✅ 右側清單也拿到自訂頭像網址
       online: !!p.online,
     }));
     arr.sort((a, b) => {
@@ -273,11 +276,21 @@ export default function Town() {
                 border: id === uid ? "3px solid #1d4ed8" : "1px solid #eee",
                 boxShadow: id === uid ? "0 0 0 3px rgba(29,78,216,.15)" : "none",
                 display: "grid", placeItems: "center",
+                overflow: "hidden", // ✅ 讓自訂頭像裁邊
               }}
             >
-              <div style={{ fontSize: 24 }}>
-                {AVATAR_EMOJI[p.avatar || "bunny"] || "🙂"}
-              </div>
+              {/* ✅ 地圖上的頭像：有自訂圖就顯示圖片，否則顯示預設 emoji */}
+              {(p.avatar === "custom" && p.avatarUrl) ? (
+                <img
+                  src={p.avatarUrl}
+                  alt={p.roleName || ""}
+                  style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 12 }}
+                />
+              ) : (
+                <div style={{ fontSize: 24 }}>
+                  {AVATAR_EMOJI[p.avatar || "bunny"] || "🙂"}
+                </div>
+              )}
             </div>
             <div
               style={{
@@ -338,8 +351,16 @@ export default function Town() {
         <div style={{ overflow: "auto", maxHeight: "calc(100vh - 32px - 40px)" }}>
           {roster.map((p) => (
             <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 4px", borderBottom: "1px dashed #f0f0f0" }}>
-              <div style={{ width: 28, height: 28, borderRadius: 10, background: "#fff", border: "1px solid #eee", display: "grid", placeItems: "center" }}>
-                <div style={{ fontSize: 18 }}>{AVATAR_EMOJI[p.avatar] || "🙂"}</div>
+              <div style={{
+                width: 28, height: 28, borderRadius: 10, background: "#fff", border: "1px solid #eee",
+                display: "grid", placeItems: "center", overflow: "hidden" // ✅ 讓圖片裁切
+              }}>
+                {/* ✅ 右側列表的頭像：優先顯示自訂圖 */}
+                {(p.avatar === "custom" && p.avatarUrl) ? (
+                  <img src={p.avatarUrl} alt={p.roleName} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 10 }} />
+                ) : (
+                  <div style={{ fontSize: 18 }}>{AVATAR_EMOJI[p.avatar] || "🙂"}</div>
+                )}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
                 <span aria-label={p.online ? "上線中" : "離線"} title={p.online ? "上線中" : "離線"} style={{ width: 8, height: 8, borderRadius: 999, background: p.online ? "#10b981" : "#bdbdbd" }} />

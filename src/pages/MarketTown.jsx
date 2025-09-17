@@ -15,6 +15,7 @@ import { auth } from "../firebase.js";
 import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
 
 
+
 export default function MarketTown() {
   const [openSheet, setOpenSheet] = useState(null); // null | "chicken" | "cannele"
   const [cartOpen, setCartOpen] = useState(false);
@@ -101,6 +102,7 @@ export default function MarketTown() {
 
       {/* HUD（右下） */}
       <HUD onOpenCart={() => setCartOpen(true)} />
+    
 
       {/* 商品清單（攤位） */}
       {openSheet && (

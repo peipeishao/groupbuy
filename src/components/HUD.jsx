@@ -7,7 +7,8 @@ import { auth } from "../firebase.js";
 import ProfileEditor from "./ProfileEditor.jsx";
 import OrderHistoryModal from "./OrderHistoryModal.jsx";
 import ImageButton from "./ui/ImageButton.jsx";
-import AdminPanel from "./AdminPanel.jsx"; // ✅ 用 AdminPanel；用 Modal 包起來顯示
+import AdminPanel from "./AdminPanel.jsx";
+import AvatarUploadInline from "./AvatarUploadInline.jsx"; // ✅ 新增：上傳頭像按鈕
 
 const AVATAR_EMOJI = { bunny: "🐰", bear: "🐻", cat: "🐱", duck: "🦆" };
 
@@ -18,7 +19,7 @@ export default function HUD({ onOpenCart }) {
   const { items } = useCart();
   const [editOpen, setEditOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [adminOpen, setAdminOpen] = useState(false); //
+  const [adminOpen, setAdminOpen] = useState(false);
 
   const cartQty = useMemo(
     () => (Array.isArray(items) ? items.reduce((s, x) => s + (Number(x.qty) || 0), 0) : 0),
@@ -26,10 +27,26 @@ export default function HUD({ onOpenCart }) {
   );
 
   const isAnonymous = !!player?.user?.isAnonymous || !player?.user?.uid;
-  const isAdmin = !!player?.isAdmin; // ✅ 用這個決定是否顯示「管理商品」
+  const isAdmin = !!player?.isAdmin;
   const roleName = player?.roleName || (isAnonymous ? "旅人" : "玩家");
   const avatar = player?.avatar || "bunny";
   const coins = Number(player?.coins || 0);
+
+  // ✅ HUD 卡片頭像：支援 custom 圖片
+  const avatarNode = useMemo(() => {
+    const av = player?.profile?.avatar || avatar;
+    const url = player?.profile?.avatarUrl || "";
+    if (av === "custom" && url) {
+      return (
+        <img
+          src={url}
+          alt="me"
+          style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover", border: "1px solid #e5e7eb" }}
+        />
+      );
+    }
+    return <span style={{ fontSize: 28 }}>{AVATAR_EMOJI[av] || "🙂"}</span>;
+  }, [player?.profile?.avatar, player?.profile?.avatarUrl, avatar]);
 
   return (
     <>
@@ -58,7 +75,7 @@ export default function HUD({ onOpenCart }) {
             boxShadow: "0 10px 24px rgba(0,0,0,.12)",
           }}
         >
-          <div style={{ fontSize: 28 }}>{AVATAR_EMOJI[avatar] || "🙂"}</div>
+          {avatarNode}
           <div style={{ minWidth: 0 }}>
             <div style={{ fontWeight: 900, lineHeight: 1.1, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>
               {roleName}
@@ -66,7 +83,7 @@ export default function HUD({ onOpenCart }) {
             <div style={{ fontSize: 12, color: "#475569" }}>金幣：{coins}</div>
           </div>
 
-          {/* 編輯（保留文字按鈕；若要改圖，把下方換成 ImageButton 即可） */}
+          {/* 編輯 */}
           {!isAnonymous && (
             <button
               onClick={() => setEditOpen(true)}
@@ -107,7 +124,7 @@ export default function HUD({ onOpenCart }) {
             imgActive="/buildings/button-dark.png"
             label="購物袋"
             labelPos="center"
-            labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }} 
+            labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
             badge={cartQty}
             width={120}
             height={48}
@@ -123,7 +140,7 @@ export default function HUD({ onOpenCart }) {
               imgActive="/buildings/button-dark.png"
               label="訂購紀錄"
               labelPos="center"
-              labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }} 
+              labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
               width={120}
               height={48}
               onClick={() => setHistoryOpen(true)}
@@ -131,16 +148,15 @@ export default function HUD({ onOpenCart }) {
             />
           )}
 
-          
-          {/* ✅ 🛠️ 管理商品（只有 admin 才顯示） */}
+          {/* 🛠️ 管理商品（只有 admin 才顯示） */}
           {isAdmin && !isAnonymous && (
             <ImageButton
-              img={`/buildings/button-normal.png`}          // 常態圖
-              imgHover={`/buildings/button-light.png`}   // 滑過（可省略）
-              imgActive={`/buildings/button-dark.png`} 
+              img={`/buildings/button-normal.png`}
+              imgHover={`/buildings/button-light.png`}
+              imgActive={`/buildings/button-dark.png`}
               label="管理商品"
               labelPos="center"
-              labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }} 
+              labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
               width={120}
               height={48}
               onClick={() => setAdminOpen(true)}
@@ -157,7 +173,7 @@ export default function HUD({ onOpenCart }) {
                 imgActive="/buildings/button-dark.png"
                 label="登入"
                 labelPos="center"
-                labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }} 
+                labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
                 width={120}
                 height={48}
                 onClick={() => player?.openLoginGate?.()}
@@ -169,7 +185,7 @@ export default function HUD({ onOpenCart }) {
                 imgActive="/buildings/button-dark.png"
                 label="建立帳號"
                 labelPos="center"
-                labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }} 
+                labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
                 width={120}
                 height={48}
                 onClick={async () => {
@@ -190,7 +206,7 @@ export default function HUD({ onOpenCart }) {
               imgActive="/buildings/button-dark.png"
               label="登出"
               labelPos="center"
-              labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }} 
+              labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
               width={120}
               height={48}
               onClick={async () => {
@@ -207,11 +223,17 @@ export default function HUD({ onOpenCart }) {
       </div>
 
       {/* 編輯角色（僅登入者可見） */}
-      <ProfileEditor open={editOpen && !isAnonymous} onClose={() => setEditOpen(false)} />
+      <ProfileEditor
+        open={editOpen && !isAnonymous}
+        onClose={() => setEditOpen(false)}
+        // ✅ 把「上傳頭像」按鈕塞進編輯視窗的頭像欄位最後
+        extraAvatarControl={<AvatarUploadInline onUploaded={() => { /* 上傳完成會自動更新 RTDB；這裡不需額外處理 */ }} />}
+      />
 
       {/* 訂購紀錄（僅登入者可見） */}
       <OrderHistoryModal open={!isAnonymous && historyOpen} onClose={() => setHistoryOpen(false)} />
-    {/* ✅ 管理商品（全畫面 Modal，保證可見 & 可關閉） */}
+
+      {/* 管理商品全畫面 Modal */}
       {adminOpen && (
         <div
           style={{
