@@ -145,7 +145,7 @@ function LoginGateImpl(_, ref) {
       try {
         const u = auth.currentUser;
         if (u) {
-          const snap = await dbGet(dbRef(db, `playersPrivate/${u.uid}/realName`));
+          const snap = await dbGet(dbRef(db, `playersPublic/${u.uid}/roleName`));
           const rn = String(snap.val() || "");
           if (rn) nameForAnnounce = rn;
         }
@@ -215,7 +215,9 @@ function LoginGateImpl(_, ref) {
         updatedAt: serverTimestamp(),
       });
 
-      await announce(`歡迎${rn}加入小鎮`);
+      // 用暱稱（剛寫進 roleName 的 rn）
+await announce(`歡迎${(rn || email.split("@")[0])}加入小鎮`);
+
       // 記住帳號
       addRememberedAccount({ email, display: rn || email.split("@")[0], avatar: "🙂" });
 
