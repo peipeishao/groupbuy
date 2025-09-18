@@ -1,5 +1,5 @@
-// src/components/LoginModal.jsx
-console.log("NEW LoginModal v2 loaded");
+// src/components/LoginModal.jsx — 改為 Email + 密碼；保留真實姓名與頭像；不存在就自動註冊
+console.log("NEW LoginModal v3 (email-based) loaded");
 import React, { useMemo, useState } from "react";
 import { auth, db } from "../firebase.js";
 import {
@@ -15,28 +15,24 @@ const AVATARS = [
   { id: "duck",  emoji: "🦆", label: "小鴨" },
 ];
 
-// ✅ 帳號允許「英文大小寫 + 數字」
-const normUsername = (s) => (s || "").replace(/[^a-zA-Z0-9]/g, "");
+const isEmail = (s) => /\S+@\S+\.\S+/.test(String(s || "").trim());
 
 export default function LoginModal({ open = true, onDone }) {
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [realName, setRealName] = useState("");
   const [password, setPassword] = useState("");
   const [avatar, setAvatar] = useState("bunny");
   const [loading, setLoading] = useState(false);
 
-  const u = useMemo(() => normUsername(username), [username]);
-  const email = useMemo(() => (u ? `${u}@groupbuy.local` : ""), [u]);
-
   if (!open) return null;
 
   const validate = () => {
-    if (!realName.trim()) {
-      alert("請輸入真實姓名");
+    if (!isEmail(email)) {
+      alert("請輸入有效 Email");
       return false;
     }
-    if (!u) {
-      alert("請輸入帳號（僅限英文或數字）");
+    if (!realName.trim()) {
+      alert("請輸入真實姓名");
       return false;
     }
     if ((password || "").length < 6) {
@@ -50,7 +46,8 @@ export default function LoginModal({ open = true, onDone }) {
     if (!validate()) return;
     setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      // 先嘗試登入
+      await signInWithEmailAndPassword(auth, email.trim(), password);
 
       // 登入成功 → 補寫資料
       const uid = auth.currentUser?.uid;
@@ -79,8 +76,9 @@ export default function LoginModal({ open = true, onDone }) {
       onDone?.();
     } catch (err) {
       if (err?.code === "auth/user-not-found") {
+        // 若不存在 → 建立帳號
         try {
-          const cred = await createUserWithEmailAndPassword(auth, email, password);
+          const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
           const uid = cred.user.uid;
 
           await set(ref(db, `playersPublic/${uid}`), {
@@ -97,7 +95,7 @@ export default function LoginModal({ open = true, onDone }) {
           await set(ref(db, `playersPrivate/${uid}`), {
             uid,
             realName: realName.trim(),
-            username: u,
+            username: (email.split("@")[0] || "player").replace(/[^a-z0-9]/gi, "").slice(0, 20),
             updatedAt: serverTimestamp(),
           });
 
@@ -157,6 +155,15 @@ export default function LoginModal({ open = true, onDone }) {
         >
           {/* 左側輸入欄位 */}
           <div className="card" style={{ background: "#fff", padding: 16, borderRadius: 16 }}>
+            <label>Email</label>
+            <input
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="yourname@gmail.com"
+              style={{ width: "100%", marginBottom: 8 }}
+              autoComplete="username"
+            />
+
             <label>真實姓名</label>
             <input
               value={realName}
@@ -165,24 +172,14 @@ export default function LoginModal({ open = true, onDone }) {
               style={{ width: "100%", marginBottom: 8 }}
             />
 
-            <label>帳號（英數，可大寫小寫）</label>
-            <input
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Peishao2025"
-              style={{ width: "100%", marginBottom: 4 }}
-            />
-            <div style={{ fontSize: 12, color: "#777", marginBottom: 8 }}>
-              將使用：<strong>{u || "your_id"}</strong>@groupbuy.local
-            </div>
-
-            <label>密碼（至少 6 碼，可大寫小寫）</label>
+            <label>密碼（至少 6 碼）</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••"
               style={{ width: "100%" }}
+              autoComplete="new-password"
             />
           </div>
 
@@ -237,4 +234,3 @@ export default function LoginModal({ open = true, onDone }) {
     </div>
   );
 }
-

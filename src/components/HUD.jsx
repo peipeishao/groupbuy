@@ -8,7 +8,9 @@ import ProfileEditor from "./ProfileEditor.jsx";
 import OrderHistoryModal from "./OrderHistoryModal.jsx";
 import ImageButton from "./ui/ImageButton.jsx";
 import AdminPanel from "./AdminPanel.jsx";
-import AvatarUploadInline from "./AvatarUploadInline.jsx"; // ✅ 新增：上傳頭像按鈕
+import AvatarUploadInline from "./AvatarUploadInline.jsx";
+import RealNameEditor from "./hud/RealNameEditor.jsx";
+import EmailBinder from "./hud/EmailBinder.jsx";
 
 const AVATAR_EMOJI = { bunny: "🐰", bear: "🐻", cat: "🐱", duck: "🦆" };
 
@@ -32,7 +34,6 @@ export default function HUD({ onOpenCart }) {
   const avatar = player?.avatar || "bunny";
   const coins = Number(player?.coins || 0);
 
-  // ✅ HUD 卡片頭像：支援 custom 圖片
   const avatarNode = useMemo(() => {
     const av = player?.profile?.avatar || avatar;
     const url = player?.profile?.avatarUrl || "";
@@ -83,7 +84,6 @@ export default function HUD({ onOpenCart }) {
             <div style={{ fontSize: 12, color: "#475569" }}>金幣：{coins}</div>
           </div>
 
-          {/* 編輯 */}
           {!isAnonymous && (
             <button
               onClick={() => setEditOpen(true)}
@@ -103,7 +103,7 @@ export default function HUD({ onOpenCart }) {
           )}
         </div>
 
-        {/* 操作列：購物袋 / 訂購紀錄 / 登入 or 登出 / 切換帳號 */}
+        {/* 操作列 */}
         <div
           style={{
             display: "flex",
@@ -117,7 +117,7 @@ export default function HUD({ onOpenCart }) {
             justifyContent: "flex-end",
           }}
         >
-          {/* 🛍️ 購物袋（圖片按鈕 + 徽章） */}
+          {/* 🛍️ 購物袋 */}
           <ImageButton
             img="/buildings/button-normal.png"
             imgHover="/buildings/button-light.png"
@@ -132,7 +132,7 @@ export default function HUD({ onOpenCart }) {
             title="開啟購物袋"
           />
 
-          {/* 📜 訂購紀錄（登入者可見） */}
+          {/* 📜 訂購紀錄 */}
           {!isAnonymous && (
             <ImageButton
               img="/buildings/button-normal.png"
@@ -148,7 +148,7 @@ export default function HUD({ onOpenCart }) {
             />
           )}
 
-          {/* 🛠️ 管理商品（只有 admin 才顯示） */}
+          {/* 🛠️ 管理商品（admin） */}
           {isAdmin && !isAnonymous && (
             <ImageButton
               img={`/buildings/button-normal.png`}
@@ -164,7 +164,7 @@ export default function HUD({ onOpenCart }) {
             />
           )}
 
-          {/* 🔐 登入 / 登出；🔄 切換帳號（匿名時） */}
+          {/* 🔐 登入 / 登出 */}
           {isAnonymous ? (
             <>
               <ImageButton
@@ -226,11 +226,17 @@ export default function HUD({ onOpenCart }) {
       <ProfileEditor
         open={editOpen && !isAnonymous}
         onClose={() => setEditOpen(false)}
-        // ✅ 把「上傳頭像」按鈕塞進編輯視窗的頭像欄位最後
-        extraAvatarControl={<AvatarUploadInline onUploaded={() => { /* 上傳完成會自動更新 RTDB；這裡不需額外處理 */ }} />}
+        // ✅ 在頭像區塊下方，放「上傳頭像」「真實姓名」「Email 綁定/驗證」
+        extraAvatarControl={
+          <div style={{ display: "grid", gap: 12 }}>
+            <AvatarUploadInline onUploaded={() => {}} />
+            <RealNameEditor />
+            <EmailBinder />
+          </div>
+        }
       />
 
-      {/* 訂購紀錄（僅登入者可見） */}
+      {/* 訂購紀錄 */}
       <OrderHistoryModal open={!isAnonymous && historyOpen} onClose={() => setHistoryOpen(false)} />
 
       {/* 管理商品全畫面 Modal */}

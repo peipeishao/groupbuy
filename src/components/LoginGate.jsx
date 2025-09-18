@@ -1,4 +1,4 @@
-// src/components/LoginGate.jsx
+// src/components/LoginGate.jsx — 改為 Email 登入/註冊；修復快速登入；加忘記密碼
 import React, {
   useImperativeHandle,
   useRef,
@@ -14,15 +14,12 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
 } from "firebase/auth";
-import { ref as dbRef, get as dbGet, set as dbSet, push as dbPush } from "firebase/database";
+import { ref as dbRef, get as dbGet, set as dbSet, push as dbPush, update as dbUpdate, serverTimestamp } from "firebase/database";
 
-const LOCAL_DOMAIN = "groupbuy.local";
-function toEmail(input) {
-  const s = String(input || "").trim();
-  if (!s) return "";
-  return s.includes("@") ? s : `${s}@${LOCAL_DOMAIN}`;
-}
+// 簡單的 Email 檢查
+const isEmail = (s) => /\S+@\S+\.\S+/.test(String(s || "").trim());
 
 // 公告
 async function announce(text) {
@@ -38,17 +35,19 @@ function LoginGateImpl(_, ref) {
   const resumeActionRef = useRef(null);
   const openOptionsRef = useRef({}); // 保存 open() 傳入的任意參數（用來 dispatch login-success）
 
-  // login form
-  const [loginAccount, setLoginAccount] = useState("");
+  // login form（Email）
+  const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
-  // signup form
-  const [signupAccount, setSignupAccount] = useState("");
+  // signup form（Email + RealName）
+  const [signupEmail, setSignupEmail] = useState("");
   const [signupPassword, setSignupPassword] = useState("");
   const [signupPassword2, setSignupPassword2] = useState("");
-  const [signupRealName, setSignupRealName] = useState(""); // ✅ 新增真實姓名
+  const [signupRealName, setSignupRealName] = useState("");
 
+  // 快速登入用的「預帶 Email」
   const [presetEmail, setPresetEmail] = useState("");
   const [autoSubmitToken, setAutoSubmitToken] = useState(0);
+  const pwdInputRef = useRef(null);
 
   const { registerLoginGate } = usePlayer() || {};
 
@@ -76,34 +75,30 @@ function LoginGateImpl(_, ref) {
     });
   }, [registerLoginGate]);
 
-  // 登入成功後，寫入快速登入清單
+  // 當 auth 狀態轉為非匿名時，將帳號加入快速登入清單（用 Email）
   useEffect(() => {
     const off = onAuthStateChanged(auth, async (u) => {
       if (!u || u.isAnonymous) return;
-      let username = "";
+      let display = "";
       try {
-        const snap = await dbGet(dbRef(db, `playersPrivate/${u.uid}`));
-        username = String(snap.val()?.username || "");
+        const snap = await dbGet(dbRef(db, `playersPrivate/${u.uid}/realName`));
+        display = String(snap.val() || "");
       } catch {}
-      const email = username ? `${username}@${LOCAL_DOMAIN}` : (u.email || "");
-      const display = (snapRealNameCache.current || "") || username || (email.split("@")[0] || "使用者");
-      if (email) addRememberedAccount({ email, display, avatar: "🙂" });
+      const email = u.email || "";
+      if (email) addRememberedAccount({ email, display: display || email.split("@")[0], avatar: "🙂" });
     });
     return () => off();
   }, []);
 
-  const snapRealNameCache = useRef(""); // 暫存剛註冊的 realName 供公告與記住帳號使用
-
-  // 被記住的帳號 → 試圖用瀏覽器憑證自動登入，失敗則帶入 email 並提示送出
+  // 快速登入：嘗試使用瀏覽器憑證；失敗則帶入 Email 並聚焦密碼欄
   async function handleSelectRemembered(acc) {
-    const email = toEmail(acc.email);
+    const email = String(acc?.email || "").trim();
     try {
       if ("credentials" in navigator) {
-        const cred = await navigator.credentials.get({ password: true, mediation: "required" });
-        if (cred && cred.type === "password") {
-          const id = toEmail(cred.id || email);
-          await signInWithEmailAndPassword(auth, id, cred.password);
-          // 公告（抓 playersPrivate 的 realName）
+        const cred = await navigator.credentials.get({ password: true, mediation: "optional" });
+        if (cred && cred.type === "password" && String(cred.id || "").toLowerCase() === email.toLowerCase()) {
+          await signInWithEmailAndPassword(auth, email, cred.password);
+          // 公告
           try {
             const u = auth.currentUser;
             let rn = "";
@@ -111,7 +106,7 @@ function LoginGateImpl(_, ref) {
               const snap = await dbGet(dbRef(db, `playersPrivate/${u.uid}/realName`));
               rn = String(snap.val() || "");
             }
-            await announce(`歡迎${rn || (id.split("@")[0])}加入小鎮`);
+            await announce(`歡迎${rn || (email.split("@")[0])}加入小鎮`);
           } catch {}
           // resume
           resumeActionRef.current?.(); resumeActionRef.current = null;
@@ -123,16 +118,26 @@ function LoginGateImpl(_, ref) {
     } catch (e) {
       console.warn("[QuickLogin] credential.get failed:", e);
     }
+    // 取不到密碼 → 預帶 Email，切到登入頁，聚焦密碼欄
     setMode("login");
     setPresetEmail(email);
     setTimeout(() => setAutoSubmitToken(Date.now()), 0);
   }
 
+  // 把 presetEmail 套到輸入框並聚焦密碼
+  useEffect(() => {
+    if (!open) return;
+    if (!presetEmail) return;
+    setLoginEmail(presetEmail);
+    setTimeout(() => pwdInputRef.current?.focus(), 0);
+  }, [presetEmail, autoSubmitToken, open]);
+
   // 登入
   async function doLogin(e) {
     e?.preventDefault?.();
-    const email = toEmail(loginAccount);
-    if (!email || !loginPassword) { alert("請輸入帳號與密碼"); return; }
+    const email = String(loginEmail || "").trim();
+    if (!isEmail(email)) { alert("請輸入有效的 Email"); return; }
+    if (!loginPassword) { alert("請輸入密碼"); return; }
     try {
       await signInWithEmailAndPassword(auth, email, loginPassword);
       // 公告（抓 playersPrivate 的 realName）
@@ -146,6 +151,15 @@ function LoginGateImpl(_, ref) {
         }
       } catch {}
       await announce(`歡迎${nameForAnnounce}加入小鎮`);
+
+      // 更新 playersPublic.online
+      try {
+        const u = auth.currentUser;
+        if (u?.uid) {
+          await dbUpdate(dbRef(db, `playersPublic/${u.uid}`), { online: true, updatedAt: serverTimestamp() });
+        }
+      } catch {}
+
       resumeActionRef.current?.(); resumeActionRef.current = null;
       window.dispatchEvent(new CustomEvent("login-success", { detail: openOptionsRef.current || {} }));
       setOpen(false);
@@ -155,34 +169,56 @@ function LoginGateImpl(_, ref) {
     }
   }
 
+  // 忘記密碼
+  async function doForgot() {
+    const email = String(loginEmail || presetEmail || "").trim();
+    if (!isEmail(email)) { alert("請先輸入有效的 Email"); return; }
+    try {
+      await sendPasswordResetEmail(auth, email);
+      alert(`已寄出重設密碼郵件到：${email}`);
+    } catch (e) {
+      console.error(e);
+      alert(e?.message || "寄送失敗，請稍後再試");
+    }
+  }
+
   // 註冊
   async function doSignup(e) {
     e?.preventDefault?.();
-    const account = String(signupAccount || "").trim();
-    if (!account || !signupPassword || !signupPassword2 || !signupRealName) {
-      alert("請完整填寫帳號 / 密碼 / 再次密碼 / 真實姓名");
-      return;
-    }
-    if (!/^[a-z0-9]{3,20}$/.test(account)) {
-      alert("帳號需為英文小寫與數字（3–20）");
-      return;
-    }
-    if (signupPassword !== signupPassword2) {
-      alert("兩次密碼不一致");
-      return;
-    }
+    const email = String(signupEmail || "").trim().toLowerCase();
+    const pwd = String(signupPassword || "");
+    const pwd2 = String(signupPassword2 || "");
+    const rn = String(signupRealName || "").trim();
+    if (!isEmail(email)) { alert("請輸入有效的 Email"); return; }
+    if (!rn) { alert("請輸入真實姓名"); return; }
+    if (!pwd) { alert("請輸入密碼"); return; }
+    if (pwd !== pwd2) { alert("兩次密碼不一致"); return; }
+
     try {
-      const email = toEmail(account);
-      const { user } = await createUserWithEmailAndPassword(auth, email, signupPassword);
-      // playersPrivate 寫入 username + realName
+      const { user } = await createUserWithEmailAndPassword(auth, email, pwd);
+
+      // playersPublic / playersPrivate 初始資料
+      await dbSet(dbRef(db, `playersPublic/${user.uid}`), {
+        uid: user.uid,
+        roleName: rn,
+        avatar: "bunny",
+        x: 400, y: 300, dir: "down",
+        bubble: null,
+        coins: 0,
+        online: true,
+        updatedAt: serverTimestamp(),
+      });
       await dbSet(dbRef(db, `playersPrivate/${user.uid}`), {
         uid: user.uid,
-        username: account,
-        realName: signupRealName,
-        updatedAt: Date.now(),
+        username: email.split("@")[0].replace(/[^a-z0-9]/gi, "").slice(0, 20) || "player",
+        realName: rn,
+        updatedAt: serverTimestamp(),
       });
-      snapRealNameCache.current = signupRealName;
-      await announce(`歡迎${signupRealName}加入小鎮`);
+
+      await announce(`歡迎${rn}加入小鎮`);
+      // 記住帳號
+      addRememberedAccount({ email, display: rn || email.split("@")[0], avatar: "🙂" });
+
       alert("建立成功，已自動登入");
       resumeActionRef.current?.(); resumeActionRef.current = null;
       window.dispatchEvent(new CustomEvent("login-success", { detail: openOptionsRef.current || {} }));
@@ -217,7 +253,7 @@ function LoginGateImpl(_, ref) {
         style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,.4)" }}
         onClick={() => setOpen(false)}
       />
-      <div style={{ position: "relative", zIndex: 1, width: 420, maxWidth: "92vw" }}>
+      <div style={{ position: "relative", zIndex: 1, width: 460, maxWidth: "92vw" }}>
         <div
           style={{
             background: "white",
@@ -236,34 +272,78 @@ function LoginGateImpl(_, ref) {
               borderBottom: "1px solid #eee",
             }}
           >
-            <button onClick={() => setMode("login")}  style={tabBtn(mode === "login")}>帳號登入</button>
-            <button onClick={() => setMode("signup")} style={tabBtn(mode === "signup")}>建立帳號（英文小寫）</button>
+            <button onClick={() => setMode("login")}  style={tabBtn(mode === "login")}>Email 登入</button>
+            <button onClick={() => setMode("signup")} style={tabBtn(mode === "signup")}>用 Email 建立帳號</button>
           </div>
 
           <div style={{ padding: 16 }}>
             {mode === "login" ? (
               <div style={hintStyle}>
-                使用 <b>帳號</b> 登入（系統會自動補上 <code>@groupbuy.local</code>）。
+                使用 <b>Email</b> 與密碼登入。
               </div>
             ) : (
               <div style={hintStyle}>
-                建立新的 <b>帳號（英文小寫與數字，3–20）</b>；登入仍使用帳號＋密碼。
+                以 <b>Email</b> 建立帳號，並填寫真實姓名（用於對帳）。登入使用 Email + 密碼。
               </div>
             )}
 
             {/* Forms */}
             {mode === "login" ? (
               <form onSubmit={doLogin} style={{ display:"grid", gap:8 }}>
-                <input style={input} placeholder="帳號（英文小寫）" value={loginAccount} onChange={e=>setLoginAccount(e.target.value.trim())} />
-                <input style={input} type="password" placeholder="密碼" value={loginPassword} onChange={e=>setLoginPassword(e.target.value)} />
-                <button type="submit" style={submitBtn}>登入</button>
+                <input
+                  style={input}
+                  placeholder="yourname@gmail.com"
+                  value={loginEmail}
+                  onChange={e=>setLoginEmail(e.target.value)}
+                  autoComplete="username"
+                />
+                <input
+                  ref={pwdInputRef}
+                  style={input}
+                  type="password"
+                  placeholder="密碼"
+                  value={loginPassword}
+                  onChange={e=>setLoginPassword(e.target.value)}
+                  autoComplete="current-password"
+                />
+                <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                  <button type="submit" style={submitBtn}>登入</button>
+                  <button type="button" onClick={doForgot} style={{ ...submitBtn, background:"#fff", color:"#111827", border:"2px solid #111827" }}>
+                    忘記密碼
+                  </button>
+                </div>
               </form>
             ) : (
               <form onSubmit={doSignup} style={{ display:"grid", gap:8 }}>
-                <input style={input} placeholder="帳號（英文小寫 3–20）" value={signupAccount} onChange={e=>setSignupAccount(e.target.value.trim())} />
-                <input style={input} type="password" placeholder="密碼" value={signupPassword} onChange={e=>setSignupPassword(e.target.value)} />
-                <input style={input} type="password" placeholder="再次輸入密碼" value={signupPassword2} onChange={e=>setSignupPassword2(e.target.value)} />
-                <input style={input} placeholder="真實姓名" value={signupRealName} onChange={e=>setSignupRealName(e.target.value)} /> {/* ✅ 新欄位 */}
+                <input
+                  style={input}
+                  placeholder="yourname@gmail.com"
+                  value={signupEmail}
+                  onChange={e=>setSignupEmail(e.target.value)}
+                  autoComplete="username"
+                />
+                <input
+                  style={input}
+                  type="password"
+                  placeholder="密碼（至少 6 碼）"
+                  value={signupPassword}
+                  onChange={e=>setSignupPassword(e.target.value)}
+                  autoComplete="new-password"
+                />
+                <input
+                  style={input}
+                  type="password"
+                  placeholder="再次輸入密碼"
+                  value={signupPassword2}
+                  onChange={e=>setSignupPassword2(e.target.value)}
+                  autoComplete="new-password"
+                />
+                <input
+                  style={input}
+                  placeholder="真實姓名（店家對帳用）"
+                  value={signupRealName}
+                  onChange={e=>setSignupRealName(e.target.value)}
+                />
                 <button type="submit" style={submitBtn}>建立帳號</button>
               </form>
             )}
@@ -271,11 +351,10 @@ function LoginGateImpl(_, ref) {
             {/* 快速登入清單 */}
             <RememberedAccounts
               onSelect={(acc) => {
-                const email = toEmail(acc.email);
                 setMode("login");
-                setPresetEmail(email);
+                setPresetEmail(String(acc?.email || "").trim());
                 setTimeout(() => setAutoSubmitToken(Date.now()), 0);
-                // 若支援密碼憑證，handleSelectRemembered 會直接處理
+                // 同時嘗試使用憑證直接登入（若瀏覽器有記住密碼）
                 handleSelectRemembered(acc);
               }}
             />

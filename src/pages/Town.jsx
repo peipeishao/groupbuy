@@ -379,7 +379,7 @@ export default function Town() {
       {/* 右側清單收合切換鈕 */}
       <button
         onClick={() => setRightCollapsed((v) => !v)}
-        title={rightCollapsed ? "展開玩家清單" : "收合玩家清單"}
+        title={rightCollapsed ? "展開村民清單" : "收合村民清單"}
         style={{
           position: "fixed",
           top: 16,
@@ -394,7 +394,7 @@ export default function Town() {
           transition: "right .18s ease",
         }}
       >
-        {rightCollapsed ? "玩家清單 ◀" : "玩家清單 ▶"}
+        {rightCollapsed ? "村民清單 ◀" : "村民清單 ▶"}
       </button>
     </>
   );

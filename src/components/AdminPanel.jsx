@@ -3,22 +3,18 @@ import React, { useState, useEffect, useMemo } from "react";
 import { db } from "../firebase.js";
 import { ref, push, onValue, update, remove } from "firebase/database";
 import { usePlayer } from "../store/playerContext.jsx";
-import AdminOrdersPanel from "./AdminOrdersPanel.jsx"; // ✅ 管理訂單分頁
+import AdminOrdersPanel from "./AdminOrdersPanel.jsx";
 
-const STALL_PRESETS = [
-  { id: "chicken", name: "雞胸肉" },
-  { id: "cannele", name: "C文可麗露" },
-];
+// ── 工具 & 常數 ─────────────────────────────────────────
+const fmt1 = (n) =>
+  new Intl.NumberFormat("zh-TW", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(Number(n) || 0);
+const ntd1 = (n)=>
+  new Intl.NumberFormat("zh-TW",{style:"currency",currency:"TWD",minimumFractionDigits:1,maximumFractionDigits:1}).format(Number(n)||0);
 
-// 數值與金額處理
 function toNumber(v) { const n = Number(v); return Number.isFinite(n) ? n : 0; }
+function toInt(v, def=0){ const n = Math.floor(Number(v)); return Number.isFinite(n) ? n : def; }
 function toMoney1(v) { const n = Number(v); return Number.isFinite(n) ? Math.round(n * 10) / 10 : 0; }
-const fmt1 = (n) => new Intl.NumberFormat("zh-TW", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(Number(n) || 0);
-const ntd1 = (n)=> new Intl.NumberFormat("zh-TW",{style:"currency",currency:"TWD",minimumFractionDigits:1,maximumFractionDigits:1}).format(Number(n)||0);
-
-function toSlug(s) {
-  return String(s || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32);
-}
+function toSlug(s) { return String(s || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 32); }
 
 // datetime-local <-> ms
 const toInput = (ms) => {
@@ -28,17 +24,16 @@ const toInput = (ms) => {
   const pad = (x) => String(x).padStart(2,"0");
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
-const fromInput = (s) => {
-  const t = Date.parse(s);
-  return Number.isFinite(t) ? t : null;
-};
+const fromInput = (s) => { const t = Date.parse(s); return Number.isFinite(t) ? t : null; };
 
 const STATUS_OPTS = [
-  { value: "ongoing", label: "開團中", color: "#f59e0b" }, // 黃
-  { value: "shipped", label: "已發車", color: "#16a34a" }, // 綠
-  { value: "ended",   label: "開團結束", color: "#94a3b8" }, // 灰
+  { value: "upcoming", label: "尚未開始", color: "#3b82f6" }, // 藍
+  { value: "ongoing",  label: "開團中",   color: "#f59e0b" }, // 黃
+  { value: "shipped",  label: "開團成功", color: "#16a34a" }, // 綠
+  { value: "ended",    label: "開團結束", color: "#94a3b8" }, // 灰
 ];
 
+// ── 元件 ────────────────────────────────────────────────
 export default function AdminPanel() {
   let player = null;
   try { player = usePlayer(); } catch {}
@@ -46,8 +41,8 @@ export default function AdminPanel() {
   const uid = player?.uid || "";
   const roleName = player?.roleName || "Admin";
 
-  // 🔀 分頁（商品 / 訂單）
-  const [tab, setTab] = useState("products"); // "products" | "orders"
+  // 分頁（商品 / 訂單）
+  const [tab, setTab] = useState("products");
   const tabBtn = (k, label) => (
     <button
       onClick={() => setTab(k)}
@@ -64,18 +59,18 @@ export default function AdminPanel() {
 
   // 商品管理狀態
   const [products, setProducts] = useState([]);
-  const [form, setForm] = useState({ name:"", original:"", price:"", category:"chicken", imageUrl:"" });
+  const [form, setForm] = useState({
+    name:"", original:"", price:"", category:"chicken", imageUrl:"",
+    stockCapacity:"",  // ✅ 可售總量（0 或空 = 不限制）
+    minQty:"1",        // ✅ 每筆最低下單量
+  });
   const [useCustomCat, setUseCustomCat] = useState(false);
   const [customCat, setCustomCat] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
 
-  // 本次開團設定
-  const [campaign, setCampaign] = useState({ status:"ongoing", closeAt:null, arriveAt:null });
-  const [savingCampaign, setSavingCampaign] = useState(false);
-
-  // 讀取產品
+  // ❶ 讀取產品
   useEffect(() => {
     const off = onValue(ref(db, "products"), (snap) => {
       const v = snap.val() || {};
@@ -86,44 +81,58 @@ export default function AdminPanel() {
     return () => off();
   }, []);
 
-  // 讀取 campaign/current
+  // ❷ 讀取所有攤位（用於「每攤位開團設定」）
+  const [stalls, setStalls] = useState([]); // [{id, title, campaign?}]
   useEffect(() => {
-    const off = onValue(ref(db, "campaign/current"), (snap) => {
+    const off = onValue(ref(db, "stalls"), (snap) => {
       const v = snap.val() || {};
-      setCampaign({
-        status: v.status || "ongoing",
-        closeAt: v.closeAt ?? null,
-        arriveAt: v.arriveAt ?? null,
-      });
+      const list = Object.entries(v).map(([id, s]) => ({
+        id,
+        title: String(s?.title || id),
+        campaign: s?.campaign || null,
+      }));
+      list.sort((a,b)=> String(a.title).localeCompare(String(b.title)));
+      setStalls(list);
     });
     return () => off();
   }, []);
 
-  // 類別清單
+  // ❸ 將 products 的 category 視為候選「攤位/分類」
   const derivedCats = useMemo(() => {
     const s = new Set();
     for (const p of products) { const cat = String(p?.category || "").trim(); if (cat) s.add(cat); }
     return Array.from(s);
   }, [products]);
-
   const selectOptions = useMemo(() => {
+    // 將現有 /stalls 與 categories 合併成選單（給新增商品選擇）
     const dedup = new Map();
-    for (const x of STALL_PRESETS) dedup.set(x.id, x.name);
+    for (const st of stalls) dedup.set(st.id, st.title);
     for (const id of derivedCats) if (!dedup.has(id)) dedup.set(id, id);
     return Array.from(dedup, ([id,name]) => ({ id, name }));
-  }, [derivedCats]);
+  }, [stalls, derivedCats]);
 
   function onChange(e){ const {name,value}=e.target; setForm((s)=>({ ...s, [name]:value })); }
 
+  // ✅ 驗證：含庫存與最低量
   const validationMsg = useMemo(() => {
     const name = String(form.name||"").trim(); if (!name) return "請輸入商品名稱"; if (name.length>50) return "商品名稱請在 50 字以內";
     const price = toNumber(form.price), original = toNumber(form.original);
     if (price<=0) return "折扣價需為正數";
     if (original<0) return "原價不可為負數";
     if (original && price>original) return "折扣價不可高於原價";
-    const img = String(form.imageUrl||"").trim(); if (img && !/^https?:\/\//i.test(img)) return "圖片網址需為 http(s) 連結";
+
+    const img = String(form.imageUrl||"").trim();
+    if (img && !/^https?:\/\//i.test(img)) return "圖片網址需為 http(s) 連結";
+
+    const cap = form.stockCapacity==="" ? 0 : toInt(form.stockCapacity, -1);
+    if (cap<0) return "可售總量需為不小於 0 的整數（空白或 0 表示不限制）";
+
+    const minQ = toInt(form.minQty, 1);
+    if (minQ<1) return "每筆最低下單量需為 ≥1 的整數";
+
     if (useCustomCat) { const slug = toSlug(customCat); if(!slug) return "請輸入自訂分類（英數小寫，可含 - _）"; }
     else if (!form.category) return "請選擇分類";
+
     return "";
   }, [form,useCustomCat,customCat]);
 
@@ -136,6 +145,8 @@ export default function AdminPanel() {
     const categoryFinal = useCustomCat ? toSlug(customCat) : String(form.category);
     const price1 = toMoney1(form.price);
     const original1 = toMoney1(form.original);
+    const cap = form.stockCapacity==="" ? 0 : toInt(form.stockCapacity, 0); // 0=不限制
+    const minQ = toInt(form.minQty, 1);
 
     setLoading(true);
     try{
@@ -145,6 +156,8 @@ export default function AdminPanel() {
         price: price1,
         category: categoryFinal,
         imageUrl: String(form.imageUrl||"").trim() || null,
+        stockCapacity: cap,   // ✅ 可售總量（0 表示不限制）
+        minQty: minQ,         // ✅ 每筆最低下單量
         updatedAt: Date.now(),
       };
       if (editingId){
@@ -153,10 +166,15 @@ export default function AdminPanel() {
       } else {
         await push(ref(db,"products"), { ...payload, createdAt: Date.now(), createdBy:{ uid, roleName } });
       }
-      setForm({ name:"", original:"", price:"", category: form.category || "chicken", imageUrl:"" });
+      setForm({
+        name:"", original:"", price:"", category: form.category || "chicken", imageUrl:"",
+        stockCapacity:"", minQty:"1",
+      });
       setUseCustomCat(false); setCustomCat("");
-    } catch (e) { console.error("[AdminPanel] submit failed:",e); setErr("操作失敗，請稍後再試。"); }
-    finally { setLoading(false); }
+    } catch (e) {
+      console.error("[AdminPanel] submit failed:",e);
+      setErr("操作失敗，請稍後再試。");
+    } finally { setLoading(false); }
   }
 
   function startEdit(p){
@@ -167,6 +185,8 @@ export default function AdminPanel() {
       price: String(p.price ?? ""),
       category: String(p.category || "chicken"),
       imageUrl: p.imageUrl || "",
+      stockCapacity: String(p.stockCapacity ?? ""), // ✅
+      minQty: String(p.minQty ?? "1"),              // ✅
     });
     setUseCustomCat(false); setCustomCat("");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -181,43 +201,67 @@ export default function AdminPanel() {
     finally{ setLoading(false); }
   }
 
-  // 儲存「本次開團設定」
-  const saveCampaign = async () => {
-    if (!isAdmin) { alert("需要管理員權限"); return; }
-    try{
-      setSavingCampaign(true);
-      await update(ref(db, "campaign/current"), {
-        status: campaign.status || "ongoing",
-        closeAt: campaign.closeAt ?? null,
-        arriveAt: campaign.arriveAt ?? null,
+  // ── 每攤位開團設定：本地可編輯狀態（避免直接動到 RTDB） ──
+  const [editingStallCamp, setEditingStallCamp] = useState({});
+  const [savingStallId, setSavingStallId] = useState("");
+
+  useEffect(() => {
+    const m = {};
+    for (const s of stalls) {
+      const c = s.campaign || {};
+      m[s.id] = {
+        status: c.status || "ongoing",
+        startAt: c.startAt ?? null,
+        closeAt: c.closeAt ?? null,
+        arriveAt: c.arriveAt ?? null,
+      };
+    }
+    setEditingStallCamp(m);
+  }, [stalls]);
+
+  const updateField = (stallId, key, value) => {
+    setEditingStallCamp((prev) => ({
+      ...prev,
+      [stallId]: { ...(prev[stallId] || {}), [key]: value }
+    }));
+  };
+
+  const saveStallCampaign = async (stallId) => {
+    const c = editingStallCamp[stallId];
+    if (!c) return;
+    setSavingStallId(stallId);
+    try {
+      await update(ref(db, `stalls/${stallId}/campaign`), {
+        status: c.status || "ongoing",
+        startAt: c.startAt ?? null,
+        closeAt: c.closeAt ?? null,
+        arriveAt: c.arriveAt ?? null,
         updatedAt: Date.now(),
       });
-      alert("本次開團設定已更新！");
-    }catch(e){
-      console.error("[Campaign] save failed", e);
-      alert("更新失敗，請稍後再試");
-    }finally{
-      setSavingCampaign(false);
+      alert(`已更新「${stallId}」的開團設定！`);
+    } catch (e) {
+      console.error("[saveStallCampaign] failed", e);
+      alert("儲存失敗，請稍後再試");
+    } finally {
+      setSavingStallId("");
     }
   };
 
-  const statusMeta = STATUS_OPTS.find(s => s.value === campaign.status) || STATUS_OPTS[0];
+  const clearStallCampaign = async (stallId) => {
+    if (!window.confirm(`確定要清除攤位「${stallId}」的開團設定嗎？`)) return;
+    setSavingStallId(stallId);
+    try {
+      await remove(ref(db, `stalls/${stallId}/campaign`));
+      alert(`已清除「${stallId}」的開團設定`);
+    } catch (e) {
+      console.error("[clearStallCampaign] failed", e);
+      alert("清除失敗，請稍後再試");
+    } finally {
+      setSavingStallId("");
+    }
+  };
 
-  if (!isAdmin) {
-    return (
-      <div style={styles.wrap}>
-        <div style={styles.card}>
-          <div style={styles.header}><div style={styles.title}>團長後台：管理中心</div></div>
-          <div style={{ padding: 16 }}>
-            <div style={styles.notice}>
-              需要管理員權限才能使用此頁面。請確認你的帳號在 <code>admins/{{uid}}</code> 下為 <code>true</code>。
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
+  // ── UI ────────────────────────────────────────────────
   return (
     <div style={styles.wrap}>
       <div style={styles.card}>
@@ -225,71 +269,94 @@ export default function AdminPanel() {
         <div style={styles.header}>
           <div style={styles.title}>團長後台：管理中心</div>
           <div style={{ display:"flex", gap:8 }}>
-            {tabBtn("products", "管理商品")}
+            {tabBtn("products", "管理商品 / 每攤位開團設定")}
             {tabBtn("orders", "管理訂單")}
           </div>
         </div>
 
-        {/* ───────────────── Products 分頁 ───────────────── */}
+        {/* ── Products 分頁 ─────────────────────────────── */}
         {tab === "products" && (
           <>
-            {/* 本次開團設定 */}
-            <div style={{ padding: 16, borderBottom: "1px solid #eee" }}>
-              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10 }}>
-                <div style={{ fontWeight:900 }}>本次開團設定</div>
-                <span style={{ padding:"2px 8px", borderRadius:999, fontSize:12, fontWeight:900, background: statusMeta.color, color:"#fff" }}>
-                  {statusMeta.label}
-                </span>
-              </div>
+            {/* 每攤位開團設定 */}
+            <div style={{ padding: 16, borderBottom: "1px solid #eee", background:"#f8fafc" }}>
+              <div style={{ fontWeight:900, marginBottom: 10 }}>每攤位開團設定</div>
 
-              <div style={{ display:"grid", gap:10, gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))" }}>
-                <div>
-                  <label style={styles.label}>收單時間</label>
-                  <input
-                    type="datetime-local"
-                    value={toInput(campaign.closeAt)}
-                    onChange={(e)=> setCampaign((s)=>({ ...s, closeAt: fromInput(e.target.value) }))}
-                    style={styles.input}
-                  />
-                  <div style={{ fontSize:12, color:"#64748b", marginTop:4 }}>讓大家知道什麼時候截止收單</div>
+              {stalls.length === 0 ? (
+                <div style={{ color:"#64748b" }}>尚未建立任何攤位（stalls）。</div>
+              ) : (
+                <div style={{ display:"grid", gap:12, gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))" }}>
+                  {stalls.map((s) => {
+                    const c = editingStallCamp[s.id] || {};
+                    const saving = savingStallId === s.id;
+                    return (
+                      <div key={s.id} style={{ border:"1px solid #e5e7eb", borderRadius:12, background:"#fff", padding:12 }}>
+                        <div style={{ fontWeight:900, marginBottom:8 }}>
+                          {s.title} <span style={{ color:"#94a3b8" }}>（{s.id}）</span>
+                        </div>
+
+                        <div style={{ display:"grid", gap:8 }}>
+                          <div>
+                            <label style={styles.label}>狀態</label>
+                            <select
+                              value={c.status || "ongoing"}
+                              onChange={(e)=> updateField(s.id, "status", e.target.value)}
+                              style={styles.input}
+                            >
+                              {STATUS_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label style={styles.label}>開團開始時間（可留空）</label>
+                            <input
+                              type="datetime-local"
+                              value={toInput(c.startAt)}
+                              onChange={(e)=> updateField(s.id, "startAt", fromInput(e.target.value))}
+                              style={styles.input}
+                            />
+                          </div>
+
+                          <div>
+                            <label style={styles.label}>收單截止時間</label>
+                            <input
+                              type="datetime-local"
+                              value={toInput(c.closeAt)}
+                              onChange={(e)=> updateField(s.id, "closeAt", fromInput(e.target.value))}
+                              style={styles.input}
+                            />
+                          </div>
+
+                          <div>
+                            <label style={styles.label}>貨到時間（可留空）</label>
+                            <input
+                              type="datetime-local"
+                              value={toInput(c.arriveAt)}
+                              onChange={(e)=> updateField(s.id, "arriveAt", fromInput(e.target.value))}
+                              style={styles.input}
+                            />
+                          </div>
+                        </div>
+
+                        <div style={{ display:"flex", gap:8, marginTop:10 }}>
+                          <button onClick={()=> saveStallCampaign(s.id)} disabled={saving} style={styles.primaryBtn}>
+                            {saving ? "儲存中…" : "儲存此攤設定"}
+                          </button>
+                          <button onClick={()=> clearStallCampaign(s.id)} disabled={saving} style={styles.secondaryBtn}>
+                            清除此攤設定
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-
-                <div>
-                  <label style={styles.label}>發車狀態</label>
-                  <select
-                    value={campaign.status}
-                    onChange={(e)=> setCampaign((s)=>({ ...s, status: e.target.value }))}
-                    style={styles.input}
-                  >
-                    {STATUS_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                  <div style={{ fontSize:12, color:"#64748b", marginTop:4 }}>開團中（黃）／ 已發車（綠）／ 開團結束（灰）</div>
-                </div>
-
-                <div>
-                  <label style={styles.label}>貨到時間</label>
-                  <input
-                    type="datetime-local"
-                    value={toInput(campaign.arriveAt)}
-                    onChange={(e)=> setCampaign((s)=>({ ...s, arriveAt: fromInput(e.target.value) }))}
-                    style={styles.input}
-                  />
-                  <div style={{ fontSize:12, color:"#64748b", marginTop:4 }}>若未定，可留空</div>
-                </div>
-              </div>
-
-              <div style={{ marginTop:12 }}>
-                <button onClick={saveCampaign} disabled={savingCampaign} style={styles.primaryBtn}>
-                  {savingCampaign ? "儲存中…" : "儲存本次開團設定"}
-                </button>
-              </div>
+              )}
             </div>
 
-            {/* 商品表單 */}
+            {/* 商品表單：✅ 新增 可售總量 / 最低下單量 */}
             <form onSubmit={onSubmit} style={styles.form}>
               <div style={styles.row}>
                 <label style={styles.label}>商品名稱</label>
-                <input name="name" value={form.name} onChange={onChange} placeholder="例如：舒肥雞胸" required style={styles.input} />
+                <input name="name" value={form.name} onChange={onChange} placeholder="例如：C文可麗露｜原味" required style={styles.input} />
               </div>
 
               <div style={styles.row2}>
@@ -304,6 +371,36 @@ export default function AdminPanel() {
                 </div>
               </div>
 
+              <div style={styles.row2}>
+                <div style={{ flex: 1 }}>
+                  <label style={styles.label}>可售總量（上限）</label>
+                  <input
+                    name="stockCapacity"
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={form.stockCapacity}
+                    onChange={onChange}
+                    placeholder="例如：80（空白或 0＝不限制）"
+                    style={styles.input}
+                  />
+                </div>
+                <div style={{ width: 12 }} />
+                <div style={{ flex: 1 }}>
+                  <label style={styles.label}>每筆最低下單量</label>
+                  <input
+                    name="minQty"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={form.minQty}
+                    onChange={onChange}
+                    placeholder="例如：2"
+                    style={styles.input}
+                  />
+                </div>
+              </div>
+
               <div style={styles.row}>
                 <label style={styles.label}>分類 / 攤位</label>
                 {!useCustomCat ? (
@@ -315,12 +412,12 @@ export default function AdminPanel() {
                   </div>
                 ) : (
                   <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-                    <input value={customCat} onChange={(e)=> setCustomCat(e.target.value)} placeholder="例如：newstall 或 my-shop" style={styles.input} />
+                    <input value={customCat} onChange={(e)=> setCustomCat(e.target.value)} placeholder="例如：cannele 或 chicken" style={styles.input} />
                     <button type="button" onClick={()=> { setUseCustomCat(false); setCustomCat(""); }} style={styles.secondaryBtn}>取消自訂</button>
                   </div>
                 )}
                 <div style={{ fontSize:12, color:"#64748b", marginTop:4 }}>
-                  前台會以 <code>category === stallId</code> 自動篩選顯示
+                  建議：C文可麗露每種口味各建一個商品（原味 / 可可），並把「可售總量」設 80、「最低下單量」設 2。
                 </div>
               </div>
 
@@ -334,12 +431,12 @@ export default function AdminPanel() {
               <div style={{ display:"flex", gap:8, marginTop:8 }}>
                 <button type="submit" disabled={loading} style={styles.primaryBtn}>{loading ? "處理中…" : editingId ? "更新商品" : "新增商品"}</button>
                 {editingId && (
-                  <button type="button" onClick={()=>{ setEditingId(null); setForm({ name:"", original:"", price:"", category:"chicken", imageUrl:"" }); setUseCustomCat(false); setCustomCat(""); }} style={styles.secondaryBtn}>取消編輯</button>
+                  <button type="button" onClick={()=>{ setEditingId(null); setForm({ name:"", original:"", price:"", category:"chicken", imageUrl:"", stockCapacity:"", minQty:"1" }); setUseCustomCat(false); setCustomCat(""); }} style={styles.secondaryBtn}>取消編輯</button>
                 )}
               </div>
             </form>
 
-            {/* 商品清單 */}
+            {/* 商品清單（顯示上限/最低量） */}
             <div style={{ marginTop: 16 }}>
               {products.length === 0 ? (
                 <div style={{ textAlign:"center", color:"#666", padding:16 }}>目前沒有任何商品，請新增。</div>
@@ -359,6 +456,9 @@ export default function AdminPanel() {
                             分類：{p.category || "（未指定）"} ｜ {ntd1(p.price)}
                             {p.original ? (<span style={{ marginLeft:6, textDecoration:"line-through", color:"#999" }}>{ntd1(p.original)}</span>) : null}
                           </div>
+                          <div style={{ fontSize:12, color:"#475569", marginTop:2 }}>
+                            可售總量：<b>{p.stockCapacity ?? 0}</b>　|　每筆最低：<b>{p.minQty ?? 1}</b>
+                          </div>
                         </div>
                       </div>
                       <div style={{ display:"flex", gap:8 }}>
@@ -373,7 +473,7 @@ export default function AdminPanel() {
           </>
         )}
 
-        {/* ───────────────── Orders 分頁 ───────────────── */}
+        {/* ── Orders 分頁 ──────────────────────────────── */}
         {tab === "orders" && (
           <div style={{ padding: 8 }}>
             <AdminOrdersPanel />
@@ -384,12 +484,12 @@ export default function AdminPanel() {
   );
 }
 
+// ── 樣式 ────────────────────────────────────────────────
 const styles = {
   wrap: { padding: 16, display: "grid", placeItems: "start center" },
   card: { width: "min(1100px, 96vw)", background: "rgba(255,255,255,.98)", border: "1px solid #eee", borderRadius: 16, boxShadow: "0 18px 36px rgba(0,0,0,.12)", overflow: "hidden" },
   header: { height: 56, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 16px", borderBottom: "1px solid #eee", background: "#f9fafb" },
   title: { fontWeight: 800 },
-  notice: { padding:16, background:"#fff8f0", border:"1px solid #fde68a", borderRadius:12, color:"#92400e", fontWeight:700 },
   form: { padding: 16, display: "grid", gap: 8 },
   row: { display: "grid", gap: 6 },
   row2: { display: "flex", gap: 0 },

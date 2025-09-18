@@ -1,4 +1,4 @@
-// src/components/OrdersSummaryTable.jsx
+// src/components/OrdersSummaryTable.jsx — 頭像改用「下單當下」的 orderedBy；保留原功能、狀態著色、日：時：秒倒數與分攤合計
 import React, { useEffect, useMemo, useState } from "react";
 import { db, auth } from "../firebase.js";
 import {
@@ -10,8 +10,25 @@ import {
 } from "firebase/database";
 import { onAuthStateChanged } from "firebase/auth";
 import { usePlayer } from "../store/playerContext.jsx";
+import OrderAvatar from "./common/OrderAvatar.jsx";
 
-// 金額（TWD）與數量格式
+/* 你可在這裡微調「攤位名稱」樣式（用攤位 ID 對應） */
+const STALL_TITLE_STYLE = {
+  chicken: { color: "#b16722ff", fontSize: 22, fontWeight: 900 }, // 雞胸肉
+  cannele: { color: "#f06d16ff", fontSize: 20, fontWeight: 800 }, // C文可麗露
+};
+// 預設樣式（沒有在上面列出的攤位會用這個）
+const DEFAULT_TITLE_STYLE = { fontSize: 18, fontWeight: 800 };
+
+/* 狀態→顯示文字與顏色（你的規格） */
+const STATUS_META = {
+  ongoing:  { label: "開團中",   color: "#ef4444" }, // 紅
+  shipped:  { label: "開團成功", color: "#16a34a" }, // 綠
+  ended:    { label: "開團結束", color: "#9ca3af" }, // 灰
+  upcoming: { label: "尚未開始", color: "#3b82f6" }, // 藍（補齊）
+};
+
+/* 金額與數量格式 */
 const ntd1 = (n) =>
   new Intl.NumberFormat("zh-TW", {
     style: "currency",
@@ -19,63 +36,113 @@ const ntd1 = (n) =>
     minimumFractionDigits: 1,
     maximumFractionDigits: 1,
   }).format(Number(n) || 0);
+
 const fmtQty = (n) =>
   new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 1 }).format(
     Number(n) || 0
   );
 
-const STATUS_META = {
-  ongoing: { label: "開團中", color: "#f59e0b" }, // 黃
-  shipped: { label: "已發車", color: "#16a34a" }, // 綠
-  ended: { label: "開團結束", color: "#94a3b8" }, // 灰
-};
+/* 將剩餘時間格式化為「日：時：秒」 */
+function formatRemainDHS(closeAtMs, nowMs) {
+  const end = Number(closeAtMs) || 0;
+  if (!end) return "-";
+  const diff = end - nowMs;
+  if (diff <= 0) return "已截止";
+  const s = Math.floor(diff / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const sec = s % 60;
+  const pad = (x) => String(x).padStart(2, "0");
+  // 依你的需求以「日：時：秒」顯示（無分）
+  return `${d}日：${pad(h)}時：${pad(sec)}秒`;
+}
+
+/** 訂閱所有攤位的 campaign，並依 startAt/closeAt 自動推導狀態 */
+function useStallCampaigns() {
+  const [stalls, setStalls] = useState([]); // [{id,title,campaign:{...}}]
+  const [, forceTick] = useState(0);
+
+  useEffect(() => {
+    const off = onValue(rtdbRef(db, "stalls"), (snap) => {
+      const v = snap.val() || {};
+      const arr = Object.entries(v).map(([id, s]) => ({
+        id,
+        title: String(s?.title || id),
+        campaign: s?.campaign || null,
+      }));
+      setStalls(arr);
+    });
+
+    // 每秒刷新一次，讓倒數/狀態自動變
+    const t = setInterval(() => {
+      forceTick((x) => (x + 1) % 1e9);
+    }, 1000);
+
+    return () => { off(); clearInterval(t); };
+  }, []);
+
+  const now = Date.now();
+
+  // 依時間推導「顯示用狀態」
+  const computeStatus = (rawStatus, startAt, closeAt) => {
+    const s = String(rawStatus || "").trim();
+
+    // 若後台標記 shipped，直接使用（優先）
+    if (s === "shipped") return "shipped";
+
+    const hasStart = typeof startAt === "number" && startAt > 0;
+    const hasClose = typeof closeAt === "number" && closeAt > 0;
+
+    if (hasStart && now < startAt) return "upcoming";
+    if (hasClose && now >= closeAt) return "ended";
+
+    // 其他情況預設 ongoing；若後台硬指定 ended/upcoming 也會在上面兩行被覆蓋
+    return "ongoing";
+  };
+
+  return stalls.map((s) => {
+    const c = s.campaign || {};
+    const startAt = c.startAt ? Number(c.startAt) : null;
+    const closeAt = c.closeAt ? Number(c.closeAt) : null;
+    const arriveAt = c.arriveAt ? Number(c.arriveAt) : null;
+
+    const status = computeStatus(c.status, startAt, closeAt);
+
+    const remain =
+      status === "upcoming"
+        ? "尚未開始"
+        : formatRemainDHS(closeAt, now); // 你的 formatRemainDHS 會處理已截止顯示
+
+    return {
+      id: s.id,
+      title: s.title,
+      status,     // ✅ 用推導後的狀態
+      startAt,
+      closeAt,
+      arriveAt,
+      upcoming: status === "upcoming",
+      ended: status === "ended",
+      remain,
+    };
+  });
+}
+
 
 export default function OrdersSummaryTable() {
   const { isAdmin } = usePlayer() || {};
   const [orders, setOrders] = useState([]); // [{ id, createdAt, orderedBy, items[], total, paid, last5 }]
   const [err, setErr] = useState("");
 
-  // ✅ 全局開團資訊（由 AdminPanel 設定）
-  const [campaign, setCampaign] = useState({
-    status: "ongoing",
-    closeAt: null,
-    arriveAt: null,
-  });
-  const [nowTick, setNowTick] = useState(0); // 倒數刷新
-
-  // 訂閱 campaign/current 與每秒 tick
-  useEffect(() => {
-    const offC = onValue(rtdbRef(db, "campaign/current"), (snap) => {
-      const v = snap.val() || {};
-      setCampaign({
-        status: v.status || "ongoing",
-        closeAt: v.closeAt ?? null,
-        arriveAt: v.arriveAt ?? null,
-      });
-    });
-    const t = setInterval(() => setNowTick((n) => (n + 1) % 1e9), 1000);
-    return () => {
-      offC();
-      clearInterval(t);
-    };
-  }, []);
+  // 每攤 campaign 資訊（頂部顯示用）
+  const stallInfo = useStallCampaigns();
 
   // 訂閱 orders（需登入：匿名也可）
   useEffect(() => {
     let detachOrders = null;
 
     const unsubAuth = onAuthStateChanged(auth, (user) => {
-      // 清除上一個訂閱
-      if (detachOrders) {
-        detachOrders();
-        detachOrders = null;
-      }
-
-      if (!user) {
-        setOrders([]);
-        setErr("尚未登入，無法載入訂單。");
-        return;
-      }
+      if (detachOrders) { detachOrders(); detachOrders = null; }
+      if (!user) { setOrders([]); setErr("尚未登入，無法載入訂單。"); return; }
 
       setErr("");
       const qOrders = query(rtdbRef(db, "orders"), limitToLast(500));
@@ -84,7 +151,6 @@ export default function OrdersSummaryTable() {
         (snap) => {
           const v = snap.val() || {};
           const list = Object.entries(v).map(([id, o]) => {
-            // items 可能是 array 或 object，轉成乾淨 array
             const rawItems = o?.items;
             const items = Array.isArray(rawItems)
               ? rawItems.filter(Boolean)
@@ -104,11 +170,7 @@ export default function OrdersSummaryTable() {
               })),
               total:
                 Number(o?.total) ||
-                items.reduce(
-                  (s, it) =>
-                    s + (Number(it.price) || 0) * (Number(it.qty) || 0),
-                  0
-                ),
+                items.reduce((s, it) => s + (Number(it.price) || 0) * (Number(it.qty) || 0), 0),
               paid: !!o?.paid,
               paidAt: Number(o?.paidAt || 0) || null,
               last5: o?.last5 || null,
@@ -125,10 +187,7 @@ export default function OrdersSummaryTable() {
       );
     });
 
-    return () => {
-      unsubAuth && unsubAuth();
-      detachOrders && detachOrders();
-    };
+    return () => { unsubAuth && unsubAuth(); detachOrders && detachOrders(); };
   }, []);
 
   // 所有訂單總金額
@@ -139,17 +198,12 @@ export default function OrdersSummaryTable() {
 
   // 分攤合計（依攤位彙總）
   const group = useMemo(() => {
-    const map = new Map(); // stall -> { items: Map(key -> {name, qty, amount}), sumQty, sumAmount }
+    const map = new Map();
     for (const o of orders) {
       for (const it of o.items || []) {
         const stall = String(it.stallId || "未知");
         if (!map.has(stall))
-          map.set(stall, {
-            stall,
-            items: new Map(),
-            sumAmount: 0,
-            sumQty: 0,
-          });
+          map.set(stall, { stall, items: new Map(), sumAmount: 0, sumQty: 0 });
         const bucket = map.get(stall);
         const key = `${it.id}|${it.name}`;
         const qty = Number(it.qty) || 0;
@@ -170,15 +224,14 @@ export default function OrdersSummaryTable() {
     }));
   }, [orders]);
 
-  // 勾/取消「已付款」：只 admin 可寫；更新 paid / paidAt / paidBy
+  // 勾/取消「已付款」
   const togglePaid = async (orderId, currentChecked) => {
-    if (!isAdmin) return; // UI 雙保險
+    if (!isAdmin) return;
     const nextPaid = !currentChecked;
     try {
       await rtdbUpdate(rtdbRef(db, `orders/${orderId}`), {
         paid: nextPaid,
         paidAt: nextPaid ? Date.now() : null,
-        paidBy: nextPaid ? auth.currentUser?.uid || null : null,
       });
     } catch (e) {
       console.error("[OrdersSummary] update paid failed:", e);
@@ -186,23 +239,7 @@ export default function OrdersSummaryTable() {
     }
   };
 
-  // 紅色倒數：日:時:分:秒
-  const countdown = useMemo(() => {
-    const end = Number(campaign.closeAt) || 0;
-    if (!end) return { text: "-", done: false };
-    const diff = end - Date.now();
-    if (diff <= 0) return { text: "已截止", done: true };
-    const s = Math.floor(diff / 1000);
-    const d = Math.floor(s / 86400);
-    const h = Math.floor((s % 86400) / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = s % 60;
-    const pad = (x) => String(x).padStart(2, "0");
-    return { text: `${d}天:${pad(h)}:${pad(m)}:${pad(sec)}`, done: false };
-  }, [campaign.closeAt, nowTick]);
-
-  const statusChip = STATUS_META[campaign.status] || STATUS_META.ongoing;
-
+  // ── UI ────────────────────────────────────────────────
   return (
     <div
       style={{
@@ -215,58 +252,40 @@ export default function OrdersSummaryTable() {
         overflow: "hidden",
       }}
     >
-      {/* ✅ 顯示全局開團資訊 + 倒數 */}
-      <div
-        style={{
-          padding: 12,
-          borderBottom: "1px solid #eee",
-          background: "#f9fafb",
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 12,
-          alignItems: "center",
-        }}
-      >
-        <div style={{ fontWeight: 900, fontSize: 18 }}>訂單列表</div>
-        <span
-          style={{
-            padding: "2px 10px",
-            borderRadius: 999,
-            color: "#fff",
-            background: statusChip.color,
-            fontWeight: 900,
-          }}
-        >
-          {statusChip.label}
-        </span>
-        <div style={{ color: "#334155" }}>
-          收單時間：
-          <b>
-            {campaign.closeAt
-              ? new Date(campaign.closeAt).toLocaleString()
-              : "-"}
-          </b>
-        </div>
-        <div style={{ color: "#334155" }}>
-          貨到時間：
-          <b>
-            {campaign.arriveAt
-              ? new Date(campaign.arriveAt).toLocaleString()
-              : "-"}
-          </b>
-        </div>
-        <div style={{ color: "#b91c1c", fontWeight: 900 }}>
-          距離收單還有：{countdown.text}
-        </div>
+      {/* 頂部：每攤位一行（狀態著色、距離收單還有＝日：時：秒） */}
+      <div style={{ padding: 12, borderBottom: "1px solid #eee", background: "#f8fafc" }}>
+        {stallInfo.length === 0 ? (
+          <div style={{ color:"#64748b" }}>尚未建立任何攤位或尚無開團設定。</div>
+        ) : (
+          <div style={{ display:"grid", gap:6 }}>
+            {stallInfo
+              .sort((a,b)=> String(a.title).localeCompare(String(b.title)))
+              .map((s) => {
+                const meta = STATUS_META[s.status] || { label: s.status, color: "#64748b" };
+                const closeText  = s.closeAt  ? new Date(s.closeAt).toLocaleString()  : "-";
+                const arriveText = s.arriveAt ? new Date(s.arriveAt).toLocaleString() : "-";
+                return (
+                  <div key={s.id} style={{ fontSize: 14, color: "#0f172a" }}>
+                    {/* 攤位名稱（可自訂樣式） */}
+                    <span style={STALL_TITLE_STYLE[s.id] || DEFAULT_TITLE_STYLE}>
+                      {s.title}
+                    </span>
+                    {/* 狀態：依規格上色 */}
+                    <span style={{ marginLeft: 8, color: meta.color, fontWeight: 900 }}>
+                      {`<${meta.label}>`}
+                    </span>
+                    {/* 收單/到貨/倒數（倒數改為 日：時：秒） */}
+                    <span style={{ marginLeft: 12 }}>收單時間：<b>{closeText}</b></span>
+                    <span style={{ marginLeft: 12 }}>貨到時間：<b>{arriveText}</b></span>
+                    <span style={{ marginLeft: 12 }}>
+                      距離收單還有：<b style={{ color: "#b91c1c" }}>{s.remain}</b>
+                    </span>
+                  </div>
+                );
+              })}
+          </div>
+        )}
       </div>
-
-      {err && (
-        <div style={{ padding: 12, color: "#b91c1c", fontWeight: 700 }}>
-          {err === "PERMISSION_DENIED"
-            ? "沒有讀取權限：請確認已登入且規則允許讀取 orders。"
-            : err}
-        </div>
-      )}
 
       {/* 訂單表（總金額為 NT$、已付款可勾選） */}
       <div style={{ overflowX: "auto" }}>
@@ -291,27 +310,22 @@ export default function OrdersSummaryTable() {
             ) : (
               orders.map((o) => {
                 const items = Array.isArray(o.items) ? o.items : [];
+                const ob = o?.orderedBy || {};
                 const buyerName =
-                  o?.orderedBy?.roleName ||
-                  (o?.orderedBy?.uid
-                    ? `旅人-${String(o.orderedBy.uid).slice(-5)}`
-                    : "旅人");
-                const avatarEmoji =
-                  { bunny: "🐰", bear: "🐻", cat: "🐱", duck: "🦆" }[
-                    o?.orderedBy?.avatar || "bunny"
-                  ] || "🙂";
+                  ob.roleName ||
+                  (ob.uid ? `旅人-${String(ob.uid).slice(-5)}` : "旅人");
 
                 return (
-                  <tr key={o.id} style={{ borderTop: "1px solid #f1f5f9" }}>
-                    <td style={tdL}>
-                      <span style={{ fontSize: 22 }}>{avatarEmoji}</span>
+                  <tr key={o.id}>
+                    {/* ✅ 頭像：使用「下單當下」的 avatarUrl / avatar */}
+                    <td style={tdC}>
+                      <OrderAvatar order={o} size={32} />
                     </td>
+
                     <td style={tdL}>
                       {buyerName}
                       <div style={{ color: "#94a3b8", fontSize: 12 }}>
-                        {o.createdAt
-                          ? new Date(o.createdAt).toLocaleString()
-                          : ""}
+                        {o.createdAt ? new Date(o.createdAt).toLocaleString() : ""}
                       </div>
                     </td>
                     <td style={tdL}>
@@ -361,7 +375,7 @@ export default function OrdersSummaryTable() {
         </table>
       </div>
 
-      {/* 分攤合計：含總數量與總金額（NT$） */}
+      {/* 分攤合計 */}
       <div style={{ borderTop: "1px solid #eee", padding: "12px 16px", fontWeight: 800 }}>
         分攤合計
       </div>
