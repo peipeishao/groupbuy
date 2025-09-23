@@ -1,129 +1,177 @@
 // src/components/ProfileEditor.jsx
 import React, { useEffect, useState } from "react";
+import { db } from "../firebase.js";
+import { ref as rRef, update as rUpdate } from "firebase/database";
 import { usePlayer } from "../store/playerContext.jsx";
 
-const PRESETS = [
-  { id: "bunny"},
-  { id: "bear"},
-  { id: "cat"},
-  { id: "duck" },
+const AVATAR_PRESETS = [
+  { key: "bunny", label: "🐰 兔子" },
+  { key: "bear",  label: "🐻 熊" },
+  { key: "cat",   label: "🐱 貓" },
+  { key: "duck",  label: "🦆 鴨子" },
 ];
 
-export default function ProfileEditor({ open, onClose, extraAvatarControl = null }) {
-  const { profile, roleName, avatar, updateRole } = usePlayer();
-  const [nameInput, setNameInput] = useState(roleName || "旅人");
-  const [choice, setChoice] = useState(avatar || "bunny");
+/**
+ * 固定區塊順序：
+ * 1. 頭像（含預設）→ 下面接 extraAvatarControl
+ * 2. 暱稱
+ * 3. extraRealName
+ * 4. extraLast5
+ * 5. extraEmailBinder
+ */
+export default function ProfileEditor({
+  open,
+  onClose,
+  extraAvatarControl = null, // 上傳頭像按鈕
+  extraRealName = null,      // 真實姓名區塊
+  extraLast5 = null,         // 末五碼區塊
+  extraEmailBinder = null,   // 綁定/修改 Email 區塊
+}) {
+  const player = usePlayer();
+  const uid = player?.user?.uid || null;
+
+  const [avatar, setAvatar] = useState(player?.profile?.avatar || "bunny");
+  const [nick, setNick] = useState(player?.roleName || "");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
 
   useEffect(() => {
     if (!open) return;
-    setNameInput(roleName || "旅人");
-    setChoice(avatar || "bunny");
-  }, [open, roleName, avatar]);
+    setAvatar(player?.profile?.avatar || "bunny");
+    setNick(player?.roleName || "");
+    setMsg("");
+  }, [open, player?.profile?.avatar, player?.roleName]);
 
   if (!open) return null;
 
-  // 儲存：只更新暱稱，頭像僅在選了「預設」時才更新（避免覆蓋現有 custom）
-  async function onSave() {
-    const patch = { roleName: nameInput?.trim().slice(0, 20) || "旅人" };
-    if (choice !== "custom") patch.avatar = choice;
-    await updateRole(patch);
-    onClose?.();
-  }
+  const saveNick = async () => {
+    if (!uid) return;
+    const name = String(nick || "").trim();
+    if (!name) { setMsg("暱稱不可空白"); return; }
+    setSaving(true);
+    try {
+      await rUpdate(rRef(db, `players/${uid}`), {
+        roleName: name,
+        "profile/roleName": name,
+        updatedAt: Date.now(),
+      });
+      setMsg("已更新暱稱");
+    } catch (e) {
+      console.error("[ProfileEditor] save nick failed:", e);
+      setMsg("儲存失敗，請稍後再試");
+    } finally { setSaving(false); }
+  };
 
-  const avNode = (p) => (
-    <label key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid #eee", borderRadius: 10, padding: "6px 8px" }}>
-      <input
-        type="radio"
-        name="av"
-        value={p.id}
-        checked={choice === p.id}
-        onChange={() => setChoice(p.id)}
-      />
-      <span style={{ fontSize: 20 }}>
-        {{ bunny: "🐰", bear: "🐻", cat: "🐱", duck: "🦆" }[p.id]}
-      </span>
-      <span>{p.label}</span>
-    </label>
-  );
-
-  const isCustom = profile?.avatar === "custom" && profile?.avatarUrl;
+  const saveAvatar = async (key) => {
+    if (!uid) return;
+    setSaving(true);
+    try {
+      setAvatar(key);
+      await rUpdate(rRef(db, `players/${uid}/profile`), {
+        avatar: key,
+        updatedAt: Date.now(),
+      });
+      setMsg("已更新頭像");
+    } catch (e) {
+      console.error("[ProfileEditor] save avatar failed:", e);
+      setMsg("儲存失敗");
+    } finally { setSaving(false); }
+  };
 
   return (
-    <div
-      onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 1500, display: "grid", placeItems: "center", padding: 12 }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{ width: "min(560px,96vw)", background: "#fff", borderRadius: 16, border: "1px solid #eee", boxShadow: "0 20px 48px rgba(0,0,0,.25)", overflow: "hidden" }}
-      >
-        <div style={{ padding: "10px 14px", borderBottom: "1px solid #eee", background: "#f9fafb", fontWeight: 900 }}>
-          編輯角色
+    <div style={overlay}>
+      <div style={panel}>
+        <div style={titleRow}>
+          <div style={{ fontWeight: 900 }}>編輯角色</div>
+          <button onClick={onClose} style={xBtn} title="關閉">✕</button>
         </div>
 
-        <div style={{ padding: 14, display: "grid", gap: 12 }}>
-          {/* 暱稱 */}
-          <label style={{ display: "grid", gap: 6 }}>
-            <div style={{ fontWeight: 800 }}>暱稱</div>
-            <input
-              value={nameInput}
-              onChange={(e) => setNameInput(e.target.value)}
-              maxLength={20}
-              placeholder="旅人"
-              style={{ padding: "8px 10px", border: "1px solid #ddd", borderRadius: 10 }}
-            />
-          </label>
+        {/* 1) 頭像＋預設 */}
+        <section style={card}>
+          <div style={secTitle}>頭像</div>
 
-          {/* 頭像（預設 + 自訂） */}
-          <div style={{ display: "grid", gap: 8 }}>
-            <div style={{ fontWeight: 800 }}>頭像</div>
-
-            {/* 自訂（若目前是 custom 就顯示預覽與 radio） */}
-            <label style={{ display: "flex", alignItems: "center", gap: 8, border: "1px solid #eee", borderRadius: 10, padding: "6px 8px" }}>
-              <input
-                type="radio"
-                name="av"
-                value="custom"
-                checked={choice === "custom"}
-                onChange={() => setChoice("custom")}
-              />
-              {isCustom ? (
-                <img
-                  src={profile.avatarUrl}
-                  alt="avatar"
-                  style={{ width: 24, height: 24, borderRadius: "50%", objectFit: "cover", border: "1px solid #e5e7eb" }}
-                />
-              ) : (
-                <span style={{ fontSize: 20 }}>🖼️</span>
-              )}
-              <span>自訂</span>
-            </label>
-
-            {/* 預設四種 */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px,1fr))", gap: 8 }}>
-              {PRESETS.map(avNode)}
-            </div>
-
-            {/* ✅ 頭像欄位最後：上傳頭像按鈕（由 HUD 傳入） */}
-            <div>{extraAvatarControl}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
+            {AVATAR_PRESETS.map((a) => (
+              <button
+                key={a.key}
+                onClick={() => saveAvatar(a.key)}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  border: avatar === a.key ? "2px solid #10b981" : "1px solid #e5e7eb",
+                  background: "#fff",
+                  cursor: "pointer",
+                  fontSize: 18,
+                }}
+                title={a.label}
+              >
+                <div style={{ fontSize: 28, lineHeight: 1 }}>{a.label.split(" ")[0]}</div>
+                <div style={{ fontSize: 12, color: "#64748b" }}>{a.label.split(" ")[1]}</div>
+              </button>
+            ))}
           </div>
-        </div>
 
-        <div style={{ padding: "10px 14px", borderTop: "1px solid #eee", display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button
-            onClick={onClose}
-            style={{ padding: "8px 12px", border: "1px solid #ddd", background: "#fff", borderRadius: 10 }}
-          >
-            取消
-          </button>
-          <button
-            onClick={onSave}
-            style={{ padding: "8px 12px", border: "2px solid #111", background: "#fff", borderRadius: 10, fontWeight: 900 }}
-          >
-            儲存
-          </button>
-        </div>
+          {/* 頭像下方：上傳頭像按鈕 */}
+          {extraAvatarControl && <div style={{ marginTop: 12 }}>{extraAvatarControl}</div>}
+        </section>
+
+        {/* 2) 暱稱 */}
+        <section style={card}>
+          <div style={secTitle}>暱稱</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              value={nick}
+              onChange={(e) => setNick(e.target.value)}
+              placeholder="輸入你的暱稱"
+              style={input}
+            />
+            <button onClick={saveNick} disabled={saving} style={primaryBtn}>
+              {saving ? "儲存中…" : "儲存"}
+            </button>
+          </div>
+        </section>
+
+        {/* 3) 真實姓名 */}
+        {extraRealName && <section style={card}>{extraRealName}</section>}
+
+        {/* 4) 末五碼 */}
+        {extraLast5 && <section style={card}>{extraLast5}</section>}
+
+        {/* 5) 綁定 / 修改 Email */}
+        {extraEmailBinder && <section style={card}>{extraEmailBinder}</section>}
+
+        {msg && <div style={{ color: "#059669", fontSize: 12, marginTop: 6 }}>{msg}</div>}
       </div>
     </div>
   );
 }
+
+const overlay = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0,0,0,.45)",
+  zIndex: 3000,
+  display: "grid",
+  placeItems: "center",
+  padding: 12,
+};
+
+const panel = {
+  width: "min(720px, 96vw)",
+  maxHeight: "min(90vh, 860px)",
+  overflow: "auto",
+  background: "#fff",
+  border: "1px solid #eee",
+  borderRadius: 16,
+  boxShadow: "0 18px 36px rgba(0,0,0,.16)",
+  padding: 14,
+  display: "grid",
+  gap: 12,
+};
+
+const titleRow = { display: "flex", alignItems: "center", justifyContent: "space-between" };
+const xBtn = { padding: "6px 10px", border: "1px solid #ddd", borderRadius: 10, background: "#fff", fontWeight: 800, cursor: "pointer" };
+const card = { border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#ffffff" };
+const secTitle = { fontWeight: 900, marginBottom: 8 };
+const input = { flex: 1, padding: "10px 12px", border: "1px solid #ddd", borderRadius: 10, background: "#fff" };
+const primaryBtn = { padding: "10px 12px", border: "2px solid #10b981", borderRadius: 10, background: "#fff", color: "#10b981", fontWeight: 900, cursor: "pointer" };

@@ -11,6 +11,7 @@ import AdminPanel from "./AdminPanel.jsx";
 import AvatarUploadInline from "./AvatarUploadInline.jsx";
 import RealNameEditor from "./hud/RealNameEditor.jsx";
 import EmailBinder from "./hud/EmailBinder.jsx";
+import Last5Editor from "./hud/Last5Editor.jsx";
 
 const AVATAR_EMOJI = { bunny: "🐰", bear: "🐻", cat: "🐱", duck: "🦆" };
 
@@ -51,7 +52,7 @@ export default function HUD({ onOpenCart }) {
 
   return (
     <>
-      {/* 固定在右下角的 HUD */}
+      {/* 右下角 HUD */}
       <div
         style={{
           position: "fixed",
@@ -117,7 +118,7 @@ export default function HUD({ onOpenCart }) {
             justifyContent: "flex-end",
           }}
         >
-          {/* 🛍️ 購物袋 */}
+          {/* 購物袋 */}
           <ImageButton
             img="/buildings/button-normal.png"
             imgHover="/buildings/button-light.png"
@@ -132,7 +133,7 @@ export default function HUD({ onOpenCart }) {
             title="開啟購物袋"
           />
 
-          {/* 📜 訂購紀錄 */}
+          {/* 訂購紀錄 */}
           {!isAnonymous && (
             <ImageButton
               img="/buildings/button-normal.png"
@@ -148,7 +149,7 @@ export default function HUD({ onOpenCart }) {
             />
           )}
 
-          {/* 🛠️ 管理商品（admin） */}
+          {/* 管理商品（admin） */}
           {isAdmin && !isAnonymous && (
             <ImageButton
               img={`/buildings/button-normal.png`}
@@ -164,7 +165,7 @@ export default function HUD({ onOpenCart }) {
             />
           )}
 
-          {/* 🔐 登入 / 登出 */}
+          {/* 登入 / 登出 */}
           {isAnonymous ? (
             <>
               <ImageButton
@@ -225,16 +226,12 @@ export default function HUD({ onOpenCart }) {
       {/* 編輯角色（僅登入者可見） */}
       <ProfileEditor
         open={editOpen && !isAnonymous}
-        onClose={() => setEditOpen(false)}
-        // ✅ 在頭像區塊下方，放「上傳頭像」「真實姓名」「Email 綁定/驗證」
-        extraAvatarControl={
-          <div style={{ display: "grid", gap: 12 }}>
-            <AvatarUploadInline onUploaded={() => {}} />
-            <RealNameEditor />
-            <EmailBinder />
-          </div>
-        }
-      />
+  onClose={() => setEditOpen(false)}
+  extraAvatarControl={<AvatarUploadInline onUploaded={() => {}} />}
+  extraRealName={<RealNameEditor />}
+  extraLast5={<Last5Editor />}
+  extraEmailBinder={<EmailBinder />}
+/>
 
       {/* 訂購紀錄 */}
       <OrderHistoryModal open={!isAnonymous && historyOpen} onClose={() => setHistoryOpen(false)} />
