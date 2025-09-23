@@ -1,7 +1,7 @@
 // src/components/reviews/ReviewModal.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { db } from "../../firebase.js";
-import { ref as dbRef, onValue, push, set, remove } from "firebase/database";
+import { ref as dbRef, onValue, push, set, remove, off as dbOff } from "firebase/database";
 import { usePlayer } from "../../store/playerContext.jsx";
 
 export default function ReviewModal({ open, itemId, itemName, onClose }) {
@@ -13,12 +13,13 @@ export default function ReviewModal({ open, itemId, itemName, onClose }) {
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState("");
 
-  // 讀取評論（規則已開放 .read:true，訪客也可讀）
   useEffect(() => {
     if (!open || !itemId) return;
+
     setErr("");
-    const off = onValue(
-      dbRef(db, `reviews/${itemId}`),
+    const ref = dbRef(db, `reviews/${itemId}`);
+    const unsub = onValue(
+      ref,
       (snap) => {
         const v = snap.val() || {};
         const arr = Object.entries(v).map(([id, r]) => ({ id, ...(r || {}) }));
@@ -30,7 +31,10 @@ export default function ReviewModal({ open, itemId, itemName, onClose }) {
         setErr("讀取評論失敗，請稍後重試");
       }
     );
-    return () => off();
+
+    return () => {
+      try { dbOff(ref, "value", unsub); } catch {}
+    };
   }, [open, itemId]);
 
   const avg = useMemo(() => {
@@ -40,7 +44,7 @@ export default function ReviewModal({ open, itemId, itemName, onClose }) {
 
   const submit = async () => {
     setErr("");
-    // 送出時才檢查登入
+
     if (!uid || !user || isAnonymous) {
       openLoginGate?.();
       return;
@@ -53,8 +57,8 @@ export default function ReviewModal({ open, itemId, itemName, onClose }) {
 
     setSending(true);
     try {
-      const ref = dbRef(db, `reviews/${itemId}`);
-      const rid = push(ref).key;
+      const parent = dbRef(db, `reviews/${itemId}`);
+      const rid = push(parent).key;
       const review = {
         uid,
         author: { uid, roleName: roleName || "玩家", avatar: avatar || "bunny" },
@@ -64,8 +68,7 @@ export default function ReviewModal({ open, itemId, itemName, onClose }) {
       };
       await set(dbRef(db, `reviews/${itemId}/${rid}`), review);
 
-      // 樂觀更新
-      setList((prev) => [{ id: rid, ...review }, ...prev]);
+      // ❌ 不再做「樂觀更新」，交給 onValue 來統一刷新，避免暫時性重複
       setText("");
       setStars(5);
     } catch (e) {
@@ -84,8 +87,7 @@ export default function ReviewModal({ open, itemId, itemName, onClose }) {
     if (!ok) return;
     try {
       await remove(dbRef(db, `reviews/${itemId}/${r.id}`));
-      // 樂觀移除
-      setList((prev) => prev.filter((x) => x.id !== r.id));
+      // 不做本地移除，讓 onValue 接手；或保留也可，但保持單一資料來源較穩
     } catch (e) {
       console.error("[ReviewModal] delete error:", e);
       alert("刪除失敗：" + (e?.message || "請稍後再試"));

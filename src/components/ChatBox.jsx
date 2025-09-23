@@ -1,5 +1,5 @@
-// src/components/ChatBox.jsx — v2: 歷史訊息＋彈送泡泡
-import React, { useEffect, useRef, useState } from "react";
+// src/components/ChatBox.jsx
+import React, { useEffect, useRef, useState, useRef as useRefAlias } from "react";
 import { usePlayer } from "../store/playerContext.jsx";
 import { db, auth } from "../firebase.js";
 import {
@@ -9,6 +9,7 @@ import {
   query,
   limitToLast,
   onChildAdded,
+  off as dbOff,
 } from "firebase/database";
 import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
 
@@ -21,24 +22,61 @@ export default function ChatBox() {
   const [text, setText] = useState("");
   const boxRef = useRef(null);
 
-  // 等到 auth（含匿名）之後再開始訂閱
+  // 保存目前的訊息id，避免同一訊息重複加入（例如重複綁訂閱）
+  const seenIdsRef = useRefAlias(new Set());
+  // 保存目前的 onChildAdded 監聽，用於切換登入狀態時先解除舊的
+  const childListenerRef = useRefAlias(null);
+  const queryRefRef = useRefAlias(null);
+  const authUnsubRef = useRefAlias(null);
+
   useEffect(() => {
-    let off = () => {};
-    const unsub = onAuthStateChanged(auth, async (u) => {
+    // 確保匿名也會登入，並避免重複綁定監聽
+    authUnsubRef.current = onAuthStateChanged(auth, async (u) => {
       try {
         if (!u) { await signInAnonymously(auth); return; }
+
         setReady(true);
+
+        // 先解除舊的監聽，避免重複
+        if (queryRefRef.current && childListenerRef.current) {
+          try { dbOff(queryRefRef.current, "child_added", childListenerRef.current); } catch {}
+          childListenerRef.current = null;
+          queryRefRef.current = null;
+        }
+
+        // 重設去重集合（以免殘留）
+        seenIdsRef.current.clear();
+
         const q = query(dbRef(db, "chat/global"), limitToLast(MAX_HISTORY));
-        off = onChildAdded(q, (snap) => {
+        queryRefRef.current = q;
+
+        const handler = (snap) => {
+          const id = snap.key;
+          if (!id || seenIdsRef.current.has(id)) return;
+
           const v = snap.val() || {};
           if (!v?.text) return;
-          setList((old) => [...old, { id: snap.key, ...v }]);
-        }, (err) => console.warn("[chat] subscribe error:", err));
+
+          seenIdsRef.current.add(id);
+          setList((old) => [...old, { id, ...v }]);
+        };
+
+        childListenerRef.current = handler;
+        onChildAdded(q, handler, (err) => console.warn("[chat] subscribe error:", err));
       } catch (e) {
         console.error("[chat] auth error:", e);
       }
     });
-    return () => { try { off(); } catch {} try { unsub(); } catch {} };
+
+    return () => {
+      // 清除監聽
+      try {
+        if (queryRefRef.current && childListenerRef.current) {
+          dbOff(queryRefRef.current, "child_added", childListenerRef.current);
+        }
+      } catch {}
+      try { authUnsubRef.current?.(); } catch {}
+    };
   }, []);
 
   // 新訊息自動捲到底
@@ -53,7 +91,7 @@ export default function ChatBox() {
     if (!t) return;
     if (!ready || !auth.currentUser) return;
     try {
-      // 寫入聊天室
+      // 寫入聊天室（不做樂觀更新，避免自我重複）
       await push(dbRef(db, "chat/global"), {
         uid: auth.currentUser.uid,
         roleName,

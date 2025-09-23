@@ -1,4 +1,4 @@
-// src/components/OrderSheetModal.jsx — 修正：minQty 首次跳門檻、之後 +1；加入購物車以本次目標量覆寫；修掉重複宣告
+// src/components/OrderSheetModal.jsx — 修正：minQty 首次跳門檻、之後 +1；加入購物袋以本次目標量覆寫；修掉重複宣告
 import React, { useEffect, useMemo, useState } from "react";
 import { db, auth } from "../firebase.js";
 import { ref, set, onValue, runTransaction } from "firebase/database";
@@ -141,9 +141,16 @@ function ProductCard({ p, q, onDec, onInc, onInput, onOpenReview }) {
         />
         <button type="button" onClick={onInc} className="small-btn">＋</button>
       </div>
-      <div style={{ marginTop: 6, color: "#475569", fontSize: 12 }}>
-        <button onClick={onOpenReview} style={linkBtn}>查看 / 撰寫評論</button>
-      </div>
+      <div style={{ marginTop: 6, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+  <button onClick={onOpenReview} style={linkBtn}>查看 / 撰寫評論</button>
+  <div
+    title={`平均 ${stats.avg.toFixed(1)}★ / 共 ${stats.count} 則`}
+    style={badgeStyle}
+  >
+    <span style={{ fontWeight: 900 }}>★ {stats.avg.toFixed(1)}</span>
+    <span style={{ opacity: .8 }}>（{stats.count}）</span>
+  </div>
+</div>
     </div>
   );
 }
@@ -481,7 +488,7 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
             style={{ padding: "10px 16px", borderRadius: 12, border: "2px solid #111", background: "#fff", fontWeight: 800, cursor: selTotalQty > 0 && !ended && !upcoming ? "pointer" : "not-allowed" }}
             title={ended ? "此攤已截止" : upcoming ? "尚未開始" : (selTotalQty > 0 ? `加入 ${selTotalQty} 件到購物袋` : "請先在上方選擇數量")}
           >
-            加入購物車
+            加入購物袋
           </button>
 
           <button onClick={onClose} style={{ padding: "10px 16px", borderRadius: 12 }}>關閉</button>
@@ -494,3 +501,14 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
 }
 
 const linkBtn = { marginLeft: 10, border: "none", background: "transparent", color: "#2563eb", cursor: "pointer", textDecoration: "underline" };
+const badgeStyle = {
+  display: "inline-flex",
+  gap: 6,
+  alignItems: "center",
+  padding: "2px 8px",
+  borderRadius: 999,
+  fontSize: 12,
+  border: "1px solid #e5e7eb",
+  background: "#f8fafc",
+  color: "#111827",
+};
