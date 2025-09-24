@@ -1,23 +1,29 @@
 // src/components/hud/Last5Editor.jsx
 import React, { useEffect, useState } from "react";
 import { db } from "../../firebase.js";
-import { ref as rRef, update as rUpdate } from "firebase/database";
+import { ref as rRef, update as rUpdate, onValue } from "firebase/database";
 import { usePlayer } from "../../store/playerContext.jsx";
 
 export default function Last5Editor() {
   const player = usePlayer();
   const uid = player?.user?.uid || null;
-  const [val, setVal] = useState(String(player?.last5 || player?.profile?.last5 || ""));
+
+  const [val, setVal] = useState("");
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
 
+  // 讀取 playersPrivate/$uid/last5
   useEffect(() => {
-    setVal(String(player?.last5 || player?.profile?.last5 || ""));
-  }, [player?.last5, player?.profile?.last5]);
+    if (!uid) return;
+    const off = onValue(rRef(db, `playersPrivate/${uid}/last5`), (snap) => {
+      const v = snap.val() || "";
+      setVal(String(v));
+    });
+    return () => off();
+  }, [uid]);
 
   const onChange = (e) => {
-    const raw = e.target.value;
-    const digits = raw.replace(/\D+/g, "").slice(0, 5);
+    const digits = e.target.value.replace(/\D+/g, "").slice(0, 5);
     setVal(digits);
   };
 
@@ -26,12 +32,18 @@ export default function Last5Editor() {
     if (!/^\d{5}$/.test(val)) { setMsg("請輸入 5 碼數字"); return; }
     setSaving(true);
     try {
-      await rUpdate(rRef(db, `players/${uid}`), { last5: val, updatedAt: Date.now() });
+      await rUpdate(rRef(db, `playersPrivate/${uid}`), {
+        uid,        // 你的規則要求節點需含 uid
+        last5: val,
+        updatedAt: Date.now(),
+      });
       setMsg("已更新末五碼");
     } catch (e) {
       console.error("[Last5Editor] save failed:", e);
       setMsg("儲存失敗，請稍後再試");
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (

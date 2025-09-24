@@ -44,23 +44,39 @@ export default function ProfileEditor({
 
   if (!open) return null;
 
-  const saveNick = async () => {
-    if (!uid) return;
-    const name = String(nick || "").trim();
-    if (!name) { setMsg("暱稱不可空白"); return; }
-    setSaving(true);
+  // ✅ 只寫 playersPublic/$uid，並帶上 uid；roleName 最多 20 字
+const saveNick = async () => {
+  const uid = player?.user?.uid;
+  if (!uid) return;
+  const name = String(nick || "").trim();
+  if (!name) { setMsg("暱稱不可空白"); return; }
+  if (name.length > 20) { setMsg("暱稱請在 20 字以內"); return; }
+
+  setSaving(true);
+  try {
+    // 寫到 playersPublic/$uid
+    await rUpdate(rRef(db, `playersPublic/${uid}`), {
+      uid,                  // 規則要求節點要含 uid
+      roleName: name,       // <= 20
+      displayName: name,    // 若前端別處讀這個，也同步
+      updatedAt: Date.now(),
+    });
+
+    // （可選）同步 Firebase Auth 的 displayName
     try {
-      await rUpdate(rRef(db, `players/${uid}`), {
-        roleName: name,
-        "profile/roleName": name,
-        updatedAt: Date.now(),
-      });
-      setMsg("已更新暱稱");
-    } catch (e) {
-      console.error("[ProfileEditor] save nick failed:", e);
-      setMsg("儲存失敗，請稍後再試");
-    } finally { setSaving(false); }
-  };
+      const cu = auth.currentUser;
+      if (cu) await updateProfile(cu, { displayName: name });
+    } catch (_) {}
+
+    setMsg("已更新暱稱");
+  } catch (e) {
+    console.error("[ProfileEditor] save nick failed:", e);
+    setMsg(`儲存失敗：${e?.code || e?.message || "請稍後再試"}`);
+  } finally {
+    setSaving(false);
+  }
+};
+
 
   const saveAvatar = async (key) => {
     if (!uid) return;
