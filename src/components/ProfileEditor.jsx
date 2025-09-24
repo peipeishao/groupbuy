@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import { db } from "../firebase.js";
 import { ref as rRef, update as rUpdate } from "firebase/database";
 import { usePlayer } from "../store/playerContext.jsx";
+import { getAuth, updateProfile } from "firebase/auth";
 
 const AVATAR_PRESETS = [
   { key: "bunny", label: "🐰 兔子" },
@@ -14,7 +15,7 @@ const AVATAR_PRESETS = [
 /**
  * 固定區塊順序：
  * 1. 頭像（含預設）→ 下面接 extraAvatarControl
- * 2. 暱稱
+ * 2. 角色名稱（roleName）
  * 3. extraRealName
  * 4. extraLast5
  * 5. extraEmailBinder
@@ -31,59 +32,63 @@ export default function ProfileEditor({
   const uid = player?.user?.uid || null;
 
   const [avatar, setAvatar] = useState(player?.profile?.avatar || "bunny");
-  const [nick, setNick] = useState(player?.roleName || "");
+  const [roleName, setRoleName] = useState(player?.roleName || "");
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
 
   useEffect(() => {
     if (!open) return;
     setAvatar(player?.profile?.avatar || "bunny");
-    setNick(player?.roleName || "");
+    setRoleName(player?.roleName || "");
     setMsg("");
   }, [open, player?.profile?.avatar, player?.roleName]);
 
   if (!open) return null;
 
-  // ✅ 只寫 playersPublic/$uid，並帶上 uid；roleName 最多 20 字
-const saveNick = async () => {
-  const uid = player?.user?.uid;
-  if (!uid) return;
-  const name = String(nick || "").trim();
-  if (!name) { setMsg("暱稱不可空白"); return; }
-  if (name.length > 20) { setMsg("暱稱請在 20 字以內"); return; }
+  // ✅ 更新角色名稱（roleName）到 playersPublic/$uid
+  const saveRoleName = async () => {
+    const auth = getAuth();
+    const curUid = player?.user?.uid;
+    if (!curUid) return;
 
-  setSaving(true);
-  try {
-    // 寫到 playersPublic/$uid
-    await rUpdate(rRef(db, `playersPublic/${uid}`), {
-      uid,                  // 規則要求節點要含 uid
-      roleName: name,       // <= 20
-      displayName: name,    // 若前端別處讀這個，也同步
-      updatedAt: Date.now(),
-    });
+    const name = String(roleName || "").trim();
+    if (!name) { setMsg("角色名稱不可空白"); return; }
+    if (name.length > 20) { setMsg("角色名稱請在 20 字以內"); return; }
 
-    // （可選）同步 Firebase Auth 的 displayName
+    setSaving(true);
     try {
-      const cu = auth.currentUser;
-      if (cu) await updateProfile(cu, { displayName: name });
-    } catch (_) {}
+      // 規則要求節點需包含 uid（因為有 newData.hasChildren(['uid'])）
+      await rUpdate(rRef(db, `playersPublic/${curUid}`), {
+        uid: curUid,
+        roleName: name,
+        updatedAt: Date.now(),
+      });
 
-    setMsg("已更新暱稱");
-  } catch (e) {
-    console.error("[ProfileEditor] save nick failed:", e);
-    setMsg(`儲存失敗：${e?.code || e?.message || "請稍後再試"}`);
-  } finally {
-    setSaving(false);
-  }
-};
+      // （可選）同步 Firebase Auth 的 displayName（不影響 RTDB 規則）
+      try {
+        const cu = auth.currentUser;
+        if (cu) await updateProfile(cu, { displayName: name });
+      } catch (_) {}
 
+      setMsg("已更新角色名稱");
+    } catch (e) {
+      console.error("[ProfileEditor] save roleName failed:", e);
+      setMsg(`儲存失敗：${e?.code || e?.message || "請稍後再試"}`);
+    } finally {
+      setSaving(false);
+    }
+  };
 
+  // ✅ 更新頭像到 playersPublic/$uid
   const saveAvatar = async (key) => {
-    if (!uid) return;
+    const curUid = player?.user?.uid;
+    if (!curUid) return;
+
     setSaving(true);
     try {
       setAvatar(key);
-      await rUpdate(rRef(db, `players/${uid}/profile`), {
+      await rUpdate(rRef(db, `playersPublic/${curUid}`), {
+        uid: curUid,          // 同樣帶上 uid 以通過節點層驗證
         avatar: key,
         updatedAt: Date.now(),
       });
@@ -131,17 +136,17 @@ const saveNick = async () => {
           {extraAvatarControl && <div style={{ marginTop: 12 }}>{extraAvatarControl}</div>}
         </section>
 
-        {/* 2) 暱稱 */}
+        {/* 2) 角色名稱（roleName） */}
         <section style={card}>
-          <div style={secTitle}>暱稱</div>
+          <div style={secTitle}>角色名稱</div>
           <div style={{ display: "flex", gap: 8 }}>
             <input
-              value={nick}
-              onChange={(e) => setNick(e.target.value)}
-              placeholder="輸入你的暱稱"
+              value={roleName}
+              onChange={(e) => setRoleName(e.target.value)}
+              placeholder="輸入你的角色名稱（20 字內）"
               style={input}
             />
-            <button onClick={saveNick} disabled={saving} style={primaryBtn}>
+            <button onClick={saveRoleName} disabled={saving} style={primaryBtn}>
               {saving ? "儲存中…" : "儲存"}
             </button>
           </div>
