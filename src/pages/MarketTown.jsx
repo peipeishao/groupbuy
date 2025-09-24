@@ -22,6 +22,7 @@ export default function MarketTown() {
 
   const BG_URL = "/bg-town.jpg";
 
+  // 攤位按鈕（維持原本）
   const placards = [
     { id: "chicken", label: "金豐盛雞胸肉", xPct: 47.0, yPct: 12.0, widthRel: 0.10 },
     { id: "cannele", label: "C文可麗露",     xPct: 65.0, yPct: 12.0, widthRel: 0.14 },
@@ -45,41 +46,43 @@ export default function MarketTown() {
     return () => { try { unsub && unsub(); } catch {} };
   }, []);
 
-  // 各自可調位置: 直接改下面 style
-  const signStyleChicken = {
-    position: "fixed",
-    left: 800,
-    top:80,
-    zIndex: 20,
-    width: "min(220px, 44vw)",
-  };
-  const signStyleCannele = {
-    position: "fixed",
-    right: 560,
-    top: 80,
-    zIndex: 20,
-    width: "min(220px, 44vw)",
-  };
-
   return (
     <div style={{ minHeight: "100vh" }}>
-      {/* 左上: 雞胸肉 */}
-      <StallStatusSign stallId="chicken" style={signStyleChicken} hideTitle
-      rowGap={4}          // 三列彼此距離（預設 6）
-      rowPaddingY={6}     // 每列上下內距（預設 4）
-      labelWidth={88}     // 左欄寬（預設 96）
-      sectionGap={2}     // 吊牌與資訊區塊距離（預設 10）
-      />
-
-      {/* 右上: C文可麗露 */}
-      <StallStatusSign stallId="cannele" style={signStyleCannele} hideTitle
-      rowGap={4}          // 三列彼此距離（預設 6）
-      rowPaddingY={6}     // 每列上下內距（預設 4）
-      labelWidth={88}     // 左欄寬（預設 96）
-      sectionGap={2}     // 吊牌與資訊區塊距離（預設 10）
-      /> 
-
+      {/* 🧭 把兩個「開團時間區塊」移進 FullBleedStage，用 Pin 做百分比定位（相對背景） */}
       <FullBleedStage bg={BG_URL} baseWidth={1920} baseHeight={1080}>
+        {/* 吊牌：雞胸肉（例：畫面上方偏左的位置） */}
+        <Pin xPct={47} yPct={24} widthRel={0.10}>
+          {/* 加個 wrapper 提升層級，避免被背景或其他元素蓋掉 */}
+          <div style={{ position: "relative", zIndex: 20 }}>
+            <StallStatusSign
+              stallId="chicken"
+              hideTitle
+              rowGap={4}
+              rowPaddingY={6}
+              labelWidth={88}
+              sectionGap={2}
+              /* 讓寬度跟著 Pin 的 widthRel 縮放，不再用固定 px */
+              style={{ width: "100%" }}
+            />
+          </div>
+        </Pin>
+
+        {/* 吊牌：C文可麗露（例：畫面上方偏右的位置） */}
+        <Pin xPct={65} yPct={24} widthRel={0.10}>
+          <div style={{ position: "relative", zIndex: 20 }}>
+            <StallStatusSign
+              stallId="cannele"
+              hideTitle
+              rowGap={4}
+              rowPaddingY={6}
+              labelWidth={88}
+              sectionGap={2}
+              style={{ width: "100%" }}
+            />
+          </div>
+        </Pin>
+
+        {/* 既有的兩顆攤位按鈕（維持原本） */}
         {placards.map((p) => (
           <Pin key={p.id} xPct={p.xPct} yPct={p.yPct} widthRel={p.widthRel}>
             <PlacardImageButton
@@ -93,10 +96,12 @@ export default function MarketTown() {
         ))}
       </FullBleedStage>
 
+      {/* 小鎮層（維持原本） */}
       <div style={{ position: "relative", zIndex: 3 }}>
         <Town />
       </div>
 
+      {/* 訂單總覽（維持原本：固定在下方中央） */}
       <div
         style={{
           position: "fixed",
@@ -120,6 +125,7 @@ export default function MarketTown() {
         </div>
       </div>
 
+      {/* 聊天框（維持原本：固定左下） */}
       <div style={{ position: "fixed", left: 18, bottom: 16, zIndex: 15 }}>
         <ChatBox />
       </div>
@@ -138,12 +144,7 @@ export default function MarketTown() {
 
       {pmOpen && <ProductManager onClose={() => setPmOpen(false)} />}
 
-      <AnnouncementDanmaku
-        lanes={4}
-        rowHeight={38}
-        topOffset={80}
-        durationSec={9}
-      />
+      <AnnouncementDanmaku lanes={4} rowHeight={38} topOffset={80} durationSec={9} />
 
       <LoginGate />
     </div>
