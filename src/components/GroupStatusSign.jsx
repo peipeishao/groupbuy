@@ -29,8 +29,9 @@ export default function GroupStatusSign({
   const arriveMs = toMs(arriveAt);
 
   const computedOpen = useMemo(() => {
+    // 多支援 "ended" 也視為關閉
     if (statusOverride === "open") return true;
-    if (statusOverride === "closed") return false;
+    if (statusOverride === "closed" || statusOverride === "ended") return false;
     if (!openMs && !closeMs) return true;
     if (openMs && now < openMs) return false;
     if (closeMs && now >= closeMs) return false;
@@ -47,21 +48,11 @@ export default function GroupStatusSign({
     return `${hh}:${mm}:${ss}`;
   }, [closeMs, now, showCountdown]);
 
-  // 精簡時間格式
-  const fmt = (ms) => {
-    if (!ms) return "—";
-    const d = new Date(ms);
-    const y = d.getFullYear();
-    const M = String(d.getMonth() + 1).padStart(2, "0");
-    const D = String(d.getDate()).padStart(2, "0");
-    const h = String(d.getHours()).padStart(2, "0");
-    const m = String(d.getMinutes()).padStart(2, "0");
-    return `${y}/${M}/${D} ${h}:${m}`;
-  };
+  // ── 顏色調整：Open 用綠、Closed 改為「灰色」 ───────────────────────────
+  const OPEN_PALETTE   = { bg: "#114d2a", edge: "#0b3b1f", text: "#ffffff", sub: "#d1fae5" };
+  const CLOSED_PALETTE = { bg: "#6b7280", edge: "#4b5563", text: "#f3f4f6", sub: "#e5e7eb" }; // 灰色系
 
-  const palette = computedOpen
-    ? { bg: "#114d2a", edge: "#0b3b1f", text: "#ffffff", sub: "#d1fae5" }
-    : { bg: "#4a1f1f", edge: "#361616", text: "#ffffff", sub: "#fecaca" };
+  const palette = computedOpen ? OPEN_PALETTE : CLOSED_PALETTE;
 
   const boardWidth = 400;
   const boardHeight = 100;
@@ -132,7 +123,18 @@ export default function GroupStatusSign({
   );
 }
 
-/* 直向資訊列的單行樣式（函式化） */
+// ── 小工具們 ──────────────────────────────────────────────────────────────
+function fmt(ms) {
+  if (!ms) return "—";
+  const d = new Date(ms);
+  const y = d.getFullYear();
+  const M = String(d.getMonth() + 1).padStart(2, "0");
+  const D = String(d.getDate()).padStart(2, "0");
+  const h = String(d.getHours()).padStart(2, "0");
+  const m = String(d.getMinutes()).padStart(2, "0");
+  return `${y}/${M}/${D} ${h}:${m}`;
+}
+
 function InfoV({ label, value, lblW, padY }) {
   return (
     <div style={infoRowItem(lblW, padY)}>
@@ -153,7 +155,6 @@ const wrap = {
   textAlign: "center",
 };
 
-/* 單欄縱向排列：以參數控制列距 */
 const infoCol = (gap) => ({
   marginTop: 6,
   display: "grid",
@@ -162,7 +163,6 @@ const infoCol = (gap) => ({
   width: "100%",
 });
 
-/* 每列：白色底板、圓角、細邊框（以參數控制左欄寬與上下內距） */
 const infoRowItem = (lblW, padY) => ({
   display: "grid",
   gridTemplateColumns: `${lblW}px 1fr`,

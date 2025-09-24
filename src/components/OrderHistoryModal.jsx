@@ -1,7 +1,7 @@
 // src/components/OrderHistoryModal.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { db } from "../firebase.js";
-import { onValue, ref as dbRef, query, limitToLast, set, update, remove } from "firebase/database";
+import { onValue, ref as dbRef, query, limitToLast, update, remove } from "firebase/database";
 import { usePlayer } from "../store/playerContext.jsx";
 
 const ntd1 = (n) =>
@@ -26,7 +26,7 @@ export default function OrderHistoryModal({ open, onClose }) {
   const { uid } = usePlayer() || {};
   const [orders, setOrders] = useState([]);
   const [campaign, setCampaign] = useState({ updatedAt: 0 });
-  const [editing, setEditing] = useState(null); // {id, items:[{...}]}
+  const [editing, setEditing] = useState(null); // {id, paid, items:[], orig:[]}
 
   useEffect(() => {
     if (!open || !uid) return;
@@ -55,28 +55,61 @@ export default function OrderHistoryModal({ open, onClose }) {
   const history = useMemo(() => orders.filter((o) => Number(o.createdAt || 0) < startTs), [orders, startTs]);
 
   const beginEdit = (o) => {
+    const itemsArray = Array.isArray(o.items) ? o.items : [];
     setEditing({
       id: o.id,
       paid: !!o.paid,
-      items: (Array.isArray(o.items) ? o.items : []).map((x) => ({ ...x, qty: Number(x.qty || 0) })),
+      items: itemsArray.map((x) => ({ ...x, qty: Number(x.qty || 0) })), // 可編輯值
+      orig: itemsArray.map((x) => ({ ...x, qty: Number(x.qty || 0) })), // 原始快照，用來做 diff
     });
   };
   const cancelEdit = () => setEditing(null);
 
+  // 只送「有變更的 qty」與同步過的 total，避免觸發其他嚴格驗證
   const saveEdit = async () => {
     if (!editing) return;
-    const items = (editing.items || []).filter((x) => Number(x.qty) > 0);
-    const total = items.reduce((s, it) => s + Number(it.price || 0) * Number(it.qty || 0), 0);
+
+    // 計算總價（忽略 qty <= 0 的項目）
+    const itemsForTotal = (editing.items || []).filter((x) => Number(x.qty) > 0);
+    const newTotal = itemsForTotal.reduce((s, it) => s + Number(it.price || 0) * Number(it.qty || 0), 0);
+
+    // 比對 orig 與現值，只針對「qty 有變」的 index 寫入
+    const updates = {};
+    const orig = editing.orig || [];
+    const curr = editing.items || [];
+    const orderPath = `orders/${editing.id}`;
+
+    // 逐一處理每一個 index
+    for (let i = 0; i < curr.length; i++) {
+      const before = orig[i] || {};
+      const after = curr[i] || {};
+      const beforeQty = Number(before.qty || 0);
+      const afterQty = Math.max(0, Math.floor(Number(after.qty || 0)));
+
+      // 只要 qty 有變更就寫入；其他欄位不動
+      if (afterQty !== beforeQty) {
+        // 收單後～出車前，規則只允許改 qty，不允許刪除項目
+        // 因此我們在這裡不會把 qty=0 的項目刪掉，只是把 qty 設為 0（若規則不允許，你會得到 permission_denied）
+        updates[`${orderPath}/items/${i}/qty`] = afterQty;
+      }
+    }
+
+    // 同步 total（白名單允許的欄位）
+    updates[`${orderPath}/total`] = newTotal;
+
+    // 注意：不要寫 updatedAt（不在白名單，會被擋）
     try {
-      await update(dbRef(db, `orders/${editing.id}`), {
-        items,
-        total,
-        updatedAt: Date.now(),
-      });
+      await update(dbRef(db), updates);
       setEditing(null);
     } catch (e) {
       console.error(e);
-      alert("儲存失敗，請稍後再試");
+      // 提供更友善的錯誤訊息
+      alert(
+        "儲存失敗：\n" +
+        "• 若已收單，可能僅允許調整數量（不能增刪品項）\n" +
+        "• 請確認你是這筆訂單的擁有者或管理員\n" +
+        "• 請稍後再試或重新整理頁面"
+      );
     }
   };
 
@@ -151,7 +184,8 @@ export default function OrderHistoryModal({ open, onClose }) {
                                         return next;
                                       });
                                     }}
-                                    style={{ width: 72, padding: "6px 8px", border: "1px solid #ddd", borderRadius: 8, textAlign: "right" }}
+                                    style={{ width: 72, padding: "6px 8px", border: "1px solid " +
+                                      "#ddd", borderRadius: 8, textAlign: "right" }}
                                   />
                                 ) : (
                                   Number(it.qty || 0)
@@ -164,10 +198,12 @@ export default function OrderHistoryModal({ open, onClose }) {
                                     onClick={() =>
                                       setEditing((s) => {
                                         const next = { ...s };
-                                        next.items = next.items.filter((_, idx) => idx !== i);
+                                        // 收單後不允許刪除項目；這裡先把 qty 設 0，實際是否允許由規則決定
+                                        next.items = next.items.map((x, idx) => idx === i ? { ...x, qty: 0 } : x);
                                         return next;
                                       })
                                     }
+                                    title="將此品項數量改為 0"
                                     style={{ padding: "6px 8px", borderRadius: 8, border: "1px solid #ddd", background: "#fff", cursor: "pointer" }}
                                   >
                                     刪
