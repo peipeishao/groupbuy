@@ -1,11 +1,39 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-Hant">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + React</title>
+
+    <!-- ✅ 強化行動裝置 viewport 與安全區 -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#ffffff" />
+
+    <!-- ✅ 建議使用（Android/Chrome PWA 與全螢幕外觀） -->
+    <meta name="mobile-web-app-capable" content="yes" />
+
+    <!-- （可選）關閉電話/信箱/地址自動偵測造成的樣式變形 -->
+    <meta name="format-detection" content="telephone=no, email=no, address=no" />
+
+    <title>GroupBuy</title>
+
+    <!-- ✅ 全域基礎樣式：改善手機 vh 跳動、圖片自適應 -->
+    <style>
+      html, body { height: 100%; }
+      body {
+        min-height: 100dvh;
+        -webkit-text-size-adjust: 100%;
+        overscroll-behavior: none;
+        margin: 0;
+      }
+      *, *::before, *::after { box-sizing: border-box; }
+      img, svg, video { max-width: 100%; height: auto; display: block; }
+      .h-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    </style>
   </head>
+
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>

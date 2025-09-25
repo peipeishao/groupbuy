@@ -6,6 +6,8 @@ import { auth, ensureAdmin } from "./firebase.js";
 import { PlayerProvider } from "./store/playerContext.jsx";
 import MarketTown from "./pages/MarketTown.jsx";
 import LoginGate from "./components/LoginGate.jsx";
+import './styles/responsive.css';
+
 
 export default function App() {
   useEffect(() => {
