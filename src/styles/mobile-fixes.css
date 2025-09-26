@@ -1,0 +1,64 @@
+/* src/styles/mobile-fixes.css */
+
+/* 讓裝置安全區有效、避免 iOS 位址列造成 100vh 跳動 */
+html, body { height: 100%; }
+body {
+  min-height: 100dvh;
+  -webkit-text-size-adjust: 100%;
+  margin: 0;
+}
+
+/* 預留底部 Dock 高度（依你的木頭按鈕群實際高度微調） */
+:root { --dock-h: 96px; }
+
+/* 內容主區：固定在可視範圍內，並預留底部 Dock 與安全區 */
+.panel-area {
+  position: fixed;
+  left: max(8px, env(safe-area-inset-left));
+  right: max(8px, env(safe-area-inset-right));
+  top: max(8px, env(safe-area-inset-top));
+  bottom: calc(var(--dock-h) + max(8px, env(safe-area-inset-bottom)));
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  z-index: 10;
+  pointer-events: auto;
+}
+
+/* 底部 Dock（木頭按鈕群）固定在安全區上方 */
+.dock {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: max(8px, env(safe-area-inset-bottom));
+  z-index: 20;
+  display: flex;
+  gap: 12px;
+  padding: 6px 10px;
+  background: rgba(255,255,255,.85);
+  border-radius: 16px;
+  backdrop-filter: blur(6px);
+}
+
+/* 左下角固定元件（聊天框） */
+.safe-fixed-corner {
+  position: fixed;
+  left: max(12px, env(safe-area-inset-left));
+  bottom: calc(var(--dock-h) + max(12px, env(safe-area-inset-bottom)));
+  z-index: 15;
+}
+
+/* 彈幕 / Toast 區：頂部置中、不擋操作 */
+.toast-stack {
+  position: fixed;
+  top: max(8px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: grid;
+  gap: 6px;
+  pointer-events: none;
+}
+.toast-stack > * { pointer-events: auto; }
+
+/* 表格太寬時可橫向捲動，避免擠爆版面 */
+.h-scroll { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
