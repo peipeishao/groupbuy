@@ -61,7 +61,7 @@ export default function HUD({ onOpenCart }) {
     zIndex: 1000,
     display: "grid",
     gap: 8,
-    minWidth: 240,
+    minWidth: 200,
   }}
 >
         {/* 玩家卡片 */}
@@ -127,7 +127,7 @@ export default function HUD({ onOpenCart }) {
             labelPos="center"
             labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
             badge={cartQty}
-            width={120}
+            width={104}
             height={48}
             onClick={onOpenCart}
             title="開啟購物袋"
@@ -142,7 +142,7 @@ export default function HUD({ onOpenCart }) {
               label="訂購紀錄"
               labelPos="center"
               labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
-              width={120}
+              width={104}
               height={48}
               onClick={() => setHistoryOpen(true)}
               title="查看我的訂購紀錄"
@@ -158,7 +158,7 @@ export default function HUD({ onOpenCart }) {
               label="管理商品"
               labelPos="center"
               labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
-              width={120}
+              width={104}
               height={48}
               onClick={() => setAdminOpen(true)}
               title="管理商品"
@@ -175,7 +175,7 @@ export default function HUD({ onOpenCart }) {
                 label="登入"
                 labelPos="center"
                 labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
-                width={120}
+                width={104}
                 height={48}
                 onClick={() => player?.openLoginGate?.()}
                 title="登入或建立帳號（升級匿名帳號，購物袋保留）"
@@ -187,7 +187,7 @@ export default function HUD({ onOpenCart }) {
                 label="建立帳號"
                 labelPos="center"
                 labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
-                width={120}
+                width={104}
                 height={48}
                 onClick={async () => {
                   if (player?.logoutAndGoAnonymous) {
@@ -208,7 +208,7 @@ export default function HUD({ onOpenCart }) {
               label="登出"
               labelPos="center"
               labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
-              width={120}
+              width={104}
               height={48}
               onClick={async () => {
                 if (player?.logoutAndGoAnonymous) {

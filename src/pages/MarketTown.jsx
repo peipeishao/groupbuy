@@ -22,7 +22,7 @@ const styles = {
     position: "fixed",
     left: "max(8px, env(safe-area-inset-left))",
     right: "max(8px, env(safe-area-inset-right))",
-    top: "max(8px, env(safe-area-inset-top))",
+    top: "max(350px, env(safe-area-inset-top))",
     bottom: `calc(${DOCK_H}px + max(8px, env(safe-area-inset-bottom)))`,
     overflow: "auto",
     WebkitOverflowScrolling: "touch",
@@ -43,12 +43,12 @@ const styles = {
   chatCorner: {
     position: "fixed",
     left: "max(12px, env(safe-area-inset-left))",
-    bottom: `calc(${DOCK_H}px + max(12px, env(safe-area-inset-bottom)))`,
+    bottom: `calc(${DOCK_H}px + max(12px, env(safe-area-inset-bottom)) - 120px)`,
     zIndex: 15,
   },
   card: {
     margin: "10px auto",
-    width: "min(1060px, 96vw)",
+    width: "min(1000px, 96vw)",
     borderRadius: 14,
     border: "1px solid #eee",
     boxShadow: "0 18px 36px rgba(0,0,0,.2)",
@@ -148,7 +148,7 @@ export default function MarketTown() {
       <div style={styles.panelArea}>
         <div style={styles.card}>
           <div style={styles.hScroll}>
-            <OrdersSummaryTable fixedWidth="900px" fixedHeight="400px" />
+            <OrdersSummaryTable fixedWidth="1000px" fixedHeight="400px" />
           </div>
         </div>
       </div>
