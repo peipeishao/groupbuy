@@ -5,6 +5,8 @@ import { ref, push, onValue, update, remove } from "firebase/database";
 import { usePlayer } from "../store/playerContext.jsx";
 import AdminOrdersPanel from "./AdminOrdersPanel.jsx";
 import AdminSummaryPanel from "./AdminSummaryPanel.jsx"; // ⬅️ 新增
+import AdminNoticePanel from "./AdminNoticePanel.jsx";
+
 
 // ── 工具 & 常數 ─────────────────────────────────────────
 const fmt1 = (n) =>
@@ -269,6 +271,7 @@ export default function AdminPanel() {
             {tabBtn("products", "管理商品 / 每攤位開團設定")}
             {tabBtn("orders", "管理訂單")}
             {tabBtn("summary", "分攤合計")} {/* ⬅️ 新增 */}
+            {tabBtn("notice", "公告")}
           </div>
         </div>
 
@@ -423,6 +426,11 @@ export default function AdminPanel() {
             <AdminSummaryPanel />
           </div>
         )}
+
+         {tab === "notice" && (
+         <AdminNoticePanel />
+        )}
+
       </div>
     </div>
   );

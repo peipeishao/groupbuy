@@ -60,7 +60,7 @@ export default function HUD({ onOpenCart }) {
     bottom: "max(12px, env(safe-area-inset-bottom))",
     zIndex: 1000,
     display: "grid",
-    gap: 8,
+    gap: 4,
     minWidth: 200,
   }}
 >
@@ -108,7 +108,7 @@ export default function HUD({ onOpenCart }) {
         <div
           style={{
             display: "flex",
-            gap: 8,
+            gap: 2,
             padding: 8,
             border: "1px solid #eee",
             borderRadius: 14,

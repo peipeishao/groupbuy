@@ -318,23 +318,25 @@ export default function Town() {
         ))}
       </div>
 
-      {/* 右側玩家清單（可收合） */}
-      <div
-        style={{
-          position: "fixed",
-          top: 16,
-          right: rightCollapsed ? -272 : 16,
-          width: 256,
-          maxHeight: "calc(100vh - 32px)",
-          background: "rgba(255,255,255,.95)",
-          border: "1px solid #eee",
-          borderRadius: 16,
-          boxShadow: "0 12px 28px rgba(0,0,0,.12)",
-          padding: 12,
-          zIndex: 90,
-          transition: "right .18s ease",
-        }}
-      >
+    {/* 右側玩家清單（可收合） */}
+<div
+  style={{
+    position: "fixed",
+    top: 16, // 想更靠上/下，就改這個
+    right: rightCollapsed ? -272 : 16,
+    width: 256,
+    // ✅ 使用 100dvh + 預留底部 HUD 與安全區，避免和底部重疊
+    maxHeight: `calc(100dvh - 16px - max(12px, env(safe-area-inset-bottom)) - 140px)`,
+    overflow: "hidden", // ✅ 超出出現卷軸
+    background: "rgba(255,255,255,.95)",
+    border: "1px solid #eee",
+    borderRadius: 16,
+    boxShadow: "0 12px 28px rgba(0,0,0,.12)",
+    padding: 12,
+    zIndex: 90,
+    transition: "right .18s ease",
+  }}
+>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
           <div style={{ fontWeight: 800 }}>小鎮人數（{roster.length}）</div>
           <div style={{ fontSize: 12, color: "#666" }}>

@@ -24,7 +24,7 @@ const styles = {
     right: "max(8px, env(safe-area-inset-right))",
     top: "max(350px, env(safe-area-inset-top))",
     bottom: `calc(${DOCK_H}px + max(8px, env(safe-area-inset-bottom)))`,
-    overflow: "auto",
+    overflow: "visible", 
     WebkitOverflowScrolling: "touch",
     zIndex: 10,
     pointerEvents: "auto",
@@ -48,7 +48,7 @@ const styles = {
   },
   card: {
     margin: "10px auto",
-    width: "min(1000px, 96vw)",
+    width: "min(1050px, 96vw)",
     borderRadius: 14,
     border: "1px solid #eee",
     boxShadow: "0 18px 36px rgba(0,0,0,.2)",

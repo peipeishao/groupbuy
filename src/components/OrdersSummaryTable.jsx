@@ -33,6 +33,7 @@ export default function OrdersSummaryTable({
   const { isAdmin } = usePlayer() || {};
   const [orders, setOrders] = useState([]); // [{ id, createdAt, orderedBy, items[], total, paid, last5 }]
   const [err, setErr] = useState("");
+  const [notice, setNotice] = useState(""); // ← 公告內容（由 /announcements/ordersSummary 讀取）
 
   // 訂閱 orders（需登入：匿名也可）
   useEffect(() => {
@@ -88,6 +89,19 @@ export default function OrdersSummaryTable({
     return () => { unsubAuth && unsubAuth(); detachOrders && detachOrders(); };
   }, []);
 
+  // 訂閱「公告欄」：/announcements/ordersSummary { text, ts }
+  useEffect(() => {
+    const off = onValue(rtdbRef(db, "announcements/ordersSummary"), (snap) => {
+      const v = snap.val();
+      const t = (v && typeof v.text === "string") ? v.text.trim() : "";
+      setNotice(t);
+    }, (e) => {
+      console.warn("[OrdersSummary] notice read failed:", e);
+      setNotice("");
+    });
+    return () => off();
+  }, []);
+
   // 所有訂單總金額
   const grandTotal = useMemo(
     () => orders.reduce((s, o) => s + (Number(o.total) || 0), 0),
@@ -125,6 +139,28 @@ export default function OrdersSummaryTable({
         flexDirection: "column",
       }}
     >
+      {/* 公告列（固定在最上方，不隨內容捲動） */}
+      {notice ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+            padding: "10px 12px",
+            background: "#fff1c6",
+            borderBottom: "1px solid #facc15",
+            fontWeight: 700,
+            color: "#4b5563",
+          }}
+          title="公告"
+        >
+          <span style={{ fontSize: 18, lineHeight: "1.2em" }} role="img" aria-label="megaphone">📣</span>
+          <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+            {notice}
+          </div>
+        </div>
+      ) : null}
+
       {/* 表格滾動區（上下＋左右） */}
       <div style={{ flex: 1, overflow: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
