@@ -1,5 +1,5 @@
 // src/pages/MarketTown.jsx
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Town from "./Town.jsx";
 import OrdersSummaryTable from "../components/OrdersSummaryTable.jsx";
 import OrderSheetModal from "../components/OrderSheetModal.jsx";
@@ -11,9 +11,21 @@ import ProductManager from "../components/ProductManager.jsx";
 import FullBleedStage, { Pin, PlacardImageButton } from "../components/FullBleedStage.jsx";
 import AnnouncementDanmaku from "../components/AnnouncementDanmaku.jsx";
 import { announce } from "../utils/announce.js";
-import { auth } from "../firebase.js";
+import { auth, db } from "../firebase.js";
 import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
 import StallStatusSign from "../components/StallStatusSign.jsx";
+
+// 🐾 寵物系統（方案B）
+import {
+  ensurePlayerPrivate,
+  ensureDefaultPetPoop,
+  watchCommunityPoops,
+  plantUserPoop,
+  pickupWildPoop,
+  distance,
+} from "./petSystem";
+
+import { ref as dbRef, onValue } from "firebase/database";
 
 // === 行動裝置版面修正（不額外建 CSS 檔，直接 inline style） ===
 const DOCK_H = 120; // 預留右下 HUD/底部元件高度，可依實際需要微調
@@ -24,7 +36,7 @@ const styles = {
     right: "max(8px, env(safe-area-inset-right))",
     top: "max(350px, env(safe-area-inset-top))",
     bottom: `calc(${DOCK_H}px + max(8px, env(safe-area-inset-bottom)))`,
-    overflow: "visible", 
+    overflow: "visible",
     WebkitOverflowScrolling: "touch",
     zIndex: 10,
     pointerEvents: "auto",
@@ -60,12 +72,49 @@ const styles = {
     overflowX: "auto",
     WebkitOverflowScrolling: "touch",
   },
+  plantBtn: {
+    position: "fixed",
+    right: "max(16px, env(safe-area-inset-right))",
+    bottom: `calc(${DOCK_H}px + max(16px, env(safe-area-inset-bottom)))`,
+    zIndex: 16,
+    padding: "10px 12px",
+    borderRadius: 999,
+    border: "2px solid #111",
+    background: "#fff",
+    fontWeight: 900,
+    cursor: "pointer",
+    boxShadow: "0 10px 24px rgba(0,0,0,.18)",
+  },
+  poopIcon: {
+    position: "absolute",
+    width: 24,
+    height: 24,
+    transform: "translate(-12px, -18px)",
+    pointerEvents: "none",
+    filter: "drop-shadow(0 2px 2px rgba(0,0,0,.35))",
+  },
 };
 
 export default function MarketTown() {
   const [openSheet, setOpenSheet] = useState(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [pmOpen, setPmOpen] = useState(false);
+
+  // 你的玩家位置（若你已在別處有此狀態，改用你的來源）
+  const [myPos, setMyPos] = useState(null);
+
+  // 監聽自己的公開位置（示例：若你已有 playersPublic 的 hook，直接用你的）
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const off = onValue(dbRef(db, `playersPublic/${uid}`), (snap) => {
+      const v = snap.val() || {};
+      if (typeof v.x === "number" && typeof v.y === "number") {
+        setMyPos({ x: v.x, y: v.y });
+      }
+    });
+    return () => off();
+  }, [auth.currentUser?.uid]);
 
   const BG_URL = "/bg-town.jpg";
 
@@ -75,23 +124,61 @@ export default function MarketTown() {
     { id: "cannele", label: "C文可麗露",     xPct: 65.0, yPct: 12.0, widthRel: 0.14 },
   ];
 
+  // 登入與玩家私有節點初始化
   useEffect(() => {
-    let unsub = () => {};
-    unsub = onAuthStateChanged(auth, async (u) => {
+    let unsub = onAuthStateChanged(auth, async (u) => {
       try {
         if (!u) {
           await signInAnonymously(auth);
           return;
         }
+        await ensurePlayerPrivate();
+        await ensureDefaultPetPoop(); // 可選：預設給一隻便便寵物
         announce("歡迎旅人進入小鎮");
         unsub && unsub();
       } catch (e) {
-        console.warn("[MarketTown] welcome announce failed:", e);
+        console.warn("[MarketTown] welcome/init failed:", e);
         unsub && unsub();
       }
     });
     return () => { try { unsub && unsub(); } catch {} };
   }, []);
+
+  // 監聽所有人的「臨時便便」播種
+  const [communityPoops, setCommunityPoops] = useState([]); // [{uid,id,x,y,expiresAt}]
+  useEffect(() => {
+    const off = watchCommunityPoops(setCommunityPoops);
+    return () => off();
+  }, []);
+
+  // 靠近任一顆便便就「撿起」：背包 +1（不刪地圖點，由 expiresAt 自動過期）
+  useEffect(() => {
+    if (!myPos) return;
+    const t = setInterval(async () => {
+      // 可加：限制每秒最多撿 N 顆，這裡先簡單處理
+      for (const p of communityPoops) {
+        if (distance(myPos, p) <= 56) {
+          // spawnId 用 `${uid}:${id}` 當唯一值
+          await pickupWildPoop(`${p.uid}:${p.id}`);
+        }
+      }
+    }, 300);
+    return () => clearInterval(t);
+  }, [myPos, communityPoops]);
+
+  // 在玩家附近播種一顆臨時便便
+  async function handlePlantNearMe() {
+    // 前端輕量限制：自己同時有效顆數 ≤ 2
+    const myUid = auth.currentUser?.uid;
+    const mine = communityPoops.filter((p) => p.uid === myUid);
+    if (mine.length >= 2) {
+      alert("你已經種了 2 顆便便，等它們過期再種吧！");
+      return;
+    }
+    const base = myPos || { x: 960, y: 540 };
+    const jitter = () => (Math.random() * 60 - 30);
+    await plantUserPoop({ x: base.x + jitter(), y: base.y + jitter() });
+  }
 
   return (
     <div style={{ minHeight: "100vh" }}>
@@ -137,6 +224,13 @@ export default function MarketTown() {
             />
           </Pin>
         ))}
+
+        {/* 在地圖層渲染大家播的便便（用 emoji 當圖示，避免缺素材） */}
+        {communityPoops.map((p) => (
+          <div key={`${p.uid}:${p.id}`} style={{ position: "absolute", left: p.x, top: p.y }}>
+            <div style={styles.poopIcon}>💩</div>
+          </div>
+        ))}
       </FullBleedStage>
 
       {/* 小鎮層（原樣） */}
@@ -160,6 +254,11 @@ export default function MarketTown() {
 
       {/* 右下角 HUD（購物袋/登入等） */}
       <HUD onOpenCart={() => setCartOpen(true)} />
+
+      {/* 便便按鈕（右下；不蓋住 HUD） */}
+      <button style={styles.plantBtn} onClick={handlePlantNearMe} title="播一顆臨時便便（10分鐘）">
+        便便 💩
+      </button>
 
       {/* 彈幕/公告：統一放在頂部安全區，不與主面板重疊 */}
       <div style={styles.toastStack}>

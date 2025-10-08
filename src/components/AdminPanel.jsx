@@ -6,6 +6,8 @@ import { usePlayer } from "../store/playerContext.jsx";
 import AdminOrdersPanel from "./AdminOrdersPanel.jsx";
 import AdminSummaryPanel from "./AdminSummaryPanel.jsx"; // ⬅️ 新增
 import AdminNoticePanel from "./AdminNoticePanel.jsx";
+import AdminPaymentInfo from "./AdminPaymentInfo.jsx";
+
 
 
 // ── 工具 & 常數 ─────────────────────────────────────────
@@ -272,6 +274,7 @@ export default function AdminPanel() {
             {tabBtn("orders", "管理訂單")}
             {tabBtn("summary", "分攤合計")} {/* ⬅️ 新增 */}
             {tabBtn("notice", "公告")}
+            {tabBtn("payment", "付款資訊")}
           </div>
         </div>
 
@@ -412,6 +415,11 @@ export default function AdminPanel() {
             {/* 商品清單（略，保留你現有渲染） */}
           </>
         )}
+
+
+        
+        {tab === "payment" && <AdminPaymentInfo />}
+
 
         {/* ── Orders 分頁 ──────────────────────────────── */}
         {tab === "orders" && (
