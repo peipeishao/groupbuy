@@ -1,5 +1,5 @@
 // src/components/GroupStatusSign.jsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useId } from "react";
 
 export default function GroupStatusSign({
   title = "本次開團",
@@ -20,6 +20,14 @@ export default function GroupStatusSign({
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
+
+   const rawId = typeof useId === "function" ? useId() : null;
+  const uniq = useMemo(() => {
+    const base = rawId || Math.random().toString(36).slice(2);
+    return String(base).replace(/[^a-zA-Z0-9_-]/g, "");
+  }, [rawId]);
+  const rustId = `rust_${uniq}`;
+  const grungeId = `grunge_${uniq}`;
 
   const toMs = (v) =>
     v instanceof Date ? v.getTime() : v == null ? undefined : Number(v) || new Date(v).getTime();
@@ -75,19 +83,20 @@ export default function GroupStatusSign({
         <line x1={boardWidth / 2} y1={18} x2={boardWidth - 60} y2={60} stroke="#6b7280" strokeWidth="3" />
         <rect x="18" y="60" rx="16" ry="16" width={boardWidth - 36} height={boardHeight} fill="#00000022" />
         <defs>
-          <linearGradient id="rust" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id={rustId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={palette.bg} />
             <stop offset="100%" stopColor={palette.edge} />
           </linearGradient>
-          <pattern id="grunge" patternUnits="userSpaceOnUse" width="10" height="10">
+          <pattern id={grungeId} patternUnits="userSpaceOnUse" width="10" height="10">
             <rect width="10" height="10" fill="transparent" />
             <circle cx="2" cy="2" r="1" fill="#00000022" />
             <circle cx="8" cy="6" r="1" fill="#ffffff18" />
             <circle cx="5" cy="9" r="1" fill="#00000022" />
           </pattern>
         </defs>
-        <rect x="12" y="54" rx="16" ry="16" width={boardWidth - 24} height={boardHeight} fill="url(#rust)" stroke="#111827" strokeWidth="3" />
-        <rect x="12" y="54" rx="16" ry="16" width={boardWidth - 24} height={boardHeight} fill="url(#grunge)" opacity="0.18" />
+        <rect x="12" y="54" rx="16" ry="16" width={boardWidth - 24} height={boardHeight} fill={`url(#${rustId})`} stroke="#111827" strokeWidth="3" />
+        <rect x="12" y="54" rx="16" ry="16" width={boardWidth - 24} height={boardHeight} fill={`url(#${grungeId})`} opacity="0.18" />
+
         <text x={boardWidth / 2} y={80} textAnchor="middle" style={{ fontSize: 22, fontWeight: 700, fill: palette.sub, letterSpacing: 1 }}>
           {computedOpen ? "COME IN • WE'RE" : "SORRY • WE'RE"}
         </text>
