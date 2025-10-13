@@ -31,12 +31,14 @@ export default function StallModal({ open, stallId, onClose }) {
   const [qty, setQty] = useState({});
   const [reviewItem, setReviewItem] = useState(null); // {id,name}
 
-  // 讀商品：/products/{stallId}
+  // 讀商品：從 /products 讀，依 stallId（或相容舊欄位 category）篩選
   useEffect(() => {
     if (!open || !stallId) return;
-    const off = onValue(dbRef(db, `products/${stallId}`), (snap) => {
+    const off = onValue(dbRef(db, "products"), (snap) => {
       const v = snap.val() || {};
-      const list = Object.entries(v).map(([id, it]) => ({ id, ...(it || {}), stallId }));
+      const list = Object.entries(v)
+        .map(([id, it]) => ({ id, ...(it || {}) }))
+        .filter((p) => String(p.stallId || p.category) === String(stallId));
       list.sort((a, b) => (a.sort || 0) - (b.sort || 0));
       setItems(list);
     });
@@ -55,11 +57,16 @@ export default function StallModal({ open, stallId, onClose }) {
 
   const addToCart = async (it) => {
     if (isAnonymous) return openLoginGate?.();
-    const q = Number(qty[it.id] || 0);
-    if (!q) return;
+    const raw = Number(qty[it.id] || 0);
+    if (!raw) return;
+
+    // 🔧 自動補到最低下單量
+    const minQ = Math.max(1, Number(it.minQty || 1));
+    const q = raw < minQ ? minQ : Math.floor(raw);
+
     const key = `${stallId}|${it.id}`;
     const path = `carts/${uid}/items/${key}`;
-    // 先把舊數量取來（這裡偷懶直接覆蓋為選擇數量；要加總可另外讀一次）
+
     await set(dbRef(db, path), {
       stallId,
       id: it.id,
@@ -68,7 +75,9 @@ export default function StallModal({ open, stallId, onClose }) {
       qty: q,
     });
     await update(dbRef(db, `carts/${uid}`), { updatedAt: Date.now() });
-    setQty((m) => ({ ...m, [it.id]: 0 }));
+
+    // 輸入框也同步顯示補後的數量
+    setQty((m) => ({ ...m, [it.id]: q }));
   };
 
   if (!open) return null;
@@ -89,7 +98,7 @@ export default function StallModal({ open, stallId, onClose }) {
               const stats = useReviewStats(it.id);
               const price = Number(it.priceGroup ?? it.price ?? 0);
               return (
-                <div key={it.id} style={card}>
+                <div key={`stall-${stallId}-prod-${it.id}`} style={card}>
                   <div style={{ display: "flex", gap: 12 }}>
                     {it.imageUrl ? (
                       <img src={it.imageUrl} alt={it.name} style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 10 }} />
@@ -120,6 +129,10 @@ export default function StallModal({ open, stallId, onClose }) {
                           <span style={{ color: "#94a3b8" }}>（{stats.count} 則評論）</span>
                         </span>
                         <button onClick={() => setReviewItem({ id: it.id, name: it.name })} style={linkBtn}>查看 / 撰寫評論</button>
+                      </div>
+
+                      <div style={{ fontSize: 11, color: "#64748b" }}>
+                        至少 {Math.max(1, Number(it.minQty || 1))}
                       </div>
 
                       {/* 數量 + 加入購物袋 */}
@@ -169,4 +182,4 @@ const xBtn = { padding: "6px 10px", borderRadius: 10, border: "1px solid #ddd", 
 const card = { border: "1px solid #f1f5f9", borderRadius: 12, padding: 10, boxShadow: "0 2px 8px rgba(0,0,0,.04)" };
 const qtyInput = { width: 80, padding: "8px 10px", border: "1px solid #ddd", borderRadius: 10, textAlign: "right" };
 const addBtn = { padding: "8px 12px", borderRadius: 10, border: "2px solid #111", background: "#fff", fontWeight: 900, cursor: "pointer" };
-const linkBtn = { marginLeft: 10, border: "none", background: "transparent", color: "#2563eb", cursor: "pointer", textDecoration: "underline" };
+const linkBtn = { marginLeft: 10, border: "none", background: "transparent", color: "rgb(37, 99, 235)", cursor: "pointer", textDecoration: "underline" };

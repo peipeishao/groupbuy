@@ -4,11 +4,9 @@ import { db } from "../firebase.js";
 import { ref, push, onValue, update, remove } from "firebase/database";
 import { usePlayer } from "../store/playerContext.jsx";
 import AdminOrdersPanel from "./AdminOrdersPanel.jsx";
-import AdminSummaryPanel from "./AdminSummaryPanel.jsx"; // ⬅️ 新增
+import AdminSummaryPanel from "./AdminSummaryPanel.jsx";
 import AdminNoticePanel from "./AdminNoticePanel.jsx";
 import AdminPaymentInfo from "./AdminPaymentInfo.jsx";
-
-
 
 // ── 工具 & 常數 ─────────────────────────────────────────
 const fmt1 = (n) =>
@@ -38,7 +36,16 @@ const STATUS_OPTS = [
   { value: "ended",    label: "開團結束", color: "#94a3b8" },
 ];
 
-// ── 元件 ────────────────────────────────────────────────
+// 將本機檔案轉成 data URL
+function fileToDataUrl(file){
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => resolve(reader.result);
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function AdminPanel() {
   let player = null;
   try { player = usePlayer(); } catch {}
@@ -46,7 +53,7 @@ export default function AdminPanel() {
   const uid = player?.uid || "";
   const roleName = player?.roleName || "Admin";
 
-  // ⬇️ 分頁（新增 summary）
+  // ⬇️ 分頁
   const [tab, setTab] = useState("products");
   const tabBtn = (k, label) => (
     <button
@@ -69,6 +76,7 @@ export default function AdminPanel() {
     stockCapacity:"",  // 可售總量（0/空＝不限制）
     minQty:"1",        // 每筆最低下單量
   });
+  const [imgPreview, setImgPreview] = useState("");
   const [useCustomCat, setUseCustomCat] = useState(false);
   const [customCat, setCustomCat] = useState("");
   const [editingId, setEditingId] = useState(null);
@@ -125,7 +133,11 @@ export default function AdminPanel() {
     if (original && price>original) return "折扣價不可高於原價";
 
     const img = String(form.imageUrl||"").trim();
-    if (img && !/^https?:\/\//i.test(img)) return "圖片網址需為 http(s) 連結";
+    if (img) {
+      const okHttp = /^https?:\/\//i.test(img);
+      const okData = /^data:image\/(png|jpe?g|webp);base64,/i.test(img);
+      if (!okHttp && !okData) return "圖片需為 http(s) 連結或 data:image;base64 資料 URI";
+    }
 
     const cap = form.stockCapacity==="" ? 0 : toInt(form.stockCapacity, -1);
     if (cap<0) return "可售總量需為不小於 0 的整數（空白或 0 表示不限制）";
@@ -173,6 +185,7 @@ export default function AdminPanel() {
         name:"", original:"", price:"", category: form.category || "chicken", imageUrl:"",
         stockCapacity:"", minQty:"1",
       });
+      setImgPreview("");
       setUseCustomCat(false); setCustomCat("");
     } catch (e) {
       console.error("[AdminPanel] submit failed:",e);
@@ -191,6 +204,7 @@ export default function AdminPanel() {
       stockCapacity: String(p.stockCapacity ?? ""),
       minQty: String(p.minQty ?? "1"),
     });
+    setImgPreview(p.imageUrl || "");
     setUseCustomCat(false); setCustomCat("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -266,13 +280,13 @@ export default function AdminPanel() {
   return (
     <div style={styles.wrap}>
       <div style={styles.card}>
-        {/* 標題 + 分頁切換（新增：分攤合計） */}
+        {/* 標題 + 分頁切換 */}
         <div style={styles.header}>
           <div style={styles.title}>團長後台：管理中心</div>
           <div style={{ display:"flex", gap:8 }}>
             {tabBtn("products", "管理商品 / 每攤位開團設定")}
             {tabBtn("orders", "管理訂單")}
-            {tabBtn("summary", "分攤合計")} {/* ⬅️ 新增 */}
+            {tabBtn("summary", "分攤合計")}
             {tabBtn("notice", "公告")}
             {tabBtn("payment", "付款資訊")}
           </div>
@@ -281,6 +295,7 @@ export default function AdminPanel() {
         {/* ── Products 分頁 ─────────────────────────────── */}
         {tab === "products" && (
           <>
+            {/* 每攤位開團設定 */}
             <div style={{ padding: 16, borderBottom: "1px solid #eee", background:"#f8fafc" }}>
               <div style={{ fontWeight:900, marginBottom: 10 }}>每攤位開團設定</div>
               {stalls.length === 0 ? (
@@ -354,13 +369,15 @@ export default function AdminPanel() {
               )}
             </div>
 
-            {/* 商品表單（略） */}
+            {/* 商品表單 */}
             <form onSubmit={onSubmit} style={styles.form}>
-              {/* ...（此處維持你原本的欄位）... */}
+              <div style={{ fontWeight:900, marginBottom: 2 }}>{editingId ? "編輯商品" : "新增商品"}</div>
+
               <div style={styles.row}>
                 <label style={styles.label}>商品名稱</label>
                 <input name="name" value={form.name} onChange={onChange} placeholder="例如：C文可麗露｜原味" required style={styles.input} />
               </div>
+
               <div style={styles.row2}>
                 <div style={{ flex: 1 }}>
                   <label style={styles.label}>原價</label>
@@ -372,6 +389,7 @@ export default function AdminPanel() {
                   <input name="price" type="number" min="0.1" step="0.1" value={form.price} onChange={onChange} placeholder="例如：50.0" required style={styles.input} />
                 </div>
               </div>
+
               <div style={styles.row2}>
                 <div style={{ flex: 1 }}>
                   <label style={styles.label}>可售總量（上限）</label>
@@ -383,6 +401,7 @@ export default function AdminPanel() {
                   <input name="minQty" type="number" min="1" step="1" value={form.minQty} onChange={onChange} placeholder="例如：2" style={styles.input} />
                 </div>
               </div>
+
               <div style={styles.row}>
                 <label style={styles.label}>分類 / 攤位</label>
                 {!useCustomCat ? (
@@ -399,27 +418,96 @@ export default function AdminPanel() {
                   </div>
                 )}
               </div>
+
+              {/* 圖片設定：網址或上傳檔案 */}
               <div style={styles.row}>
-                <label style={styles.label}>圖片網址（選填）</label>
-                <input name="imageUrl" value={form.imageUrl} onChange={onChange} placeholder="例如：https://..." style={styles.input} />
+                <label style={styles.label}>商品圖片</label>
+                <input
+                  name="imageUrl"
+                  value={form.imageUrl}
+                  onChange={(e)=> { onChange(e); setImgPreview(e.target.value); }}
+                  placeholder="貼 http(s) 連結或留空"
+                  style={styles.input}
+                />
+                <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    onChange={async (e)=>{
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      const dataUrl = await fileToDataUrl(file); // data:image/...;base64
+                      setForm((s)=>({ ...s, imageUrl: dataUrl }));
+                      setImgPreview(dataUrl);
+                    }}
+                    style={{}}
+                  />
+                  <span style={{ fontSize:12, color:"#64748b" }}>（上傳後會自動存為 data URL）</span>
+                </div>
+                {imgPreview ? (
+                  <div style={{ marginTop:8 }}>
+                    <div style={{ fontSize:12, color:"#64748b", marginBottom:4 }}>預覽</div>
+                    <img src={imgPreview} alt="preview" style={{ maxWidth:220, maxHeight:140, objectFit:"cover", borderRadius:8, border:"1px solid #eee" }} />
+                  </div>
+                ) : null}
               </div>
+
               {err && <div style={styles.error}>{err}</div>}
               <div style={{ display:"flex", gap:8, marginTop:8 }}>
                 <button type="submit" disabled={loading} style={styles.primaryBtn}>{loading ? "處理中…" : editingId ? "更新商品" : "新增商品"}</button>
                 {editingId && (
-                  <button type="button" onClick={()=>{ setEditingId(null); setForm({ name:"", original:"", price:"", category:"chicken", imageUrl:"", stockCapacity:"", minQty:"1" }); setUseCustomCat(false); setCustomCat(""); }} style={styles.secondaryBtn}>取消編輯</button>
+                  <button
+                    type="button"
+                    onClick={()=>{ setEditingId(null); setForm({ name:"", original:"", price:"", category:"chicken", imageUrl:"", stockCapacity:"", minQty:"1" }); setImgPreview(""); setUseCustomCat(false); setCustomCat(""); }}
+                    style={styles.secondaryBtn}
+                  >
+                    取消編輯
+                  </button>
                 )}
               </div>
             </form>
 
-            {/* 商品清單（略，保留你現有渲染） */}
+            {/* 已上架商品清單 */}
+            <div style={{ padding:16, borderTop:"1px solid #eee" }}>
+              <div style={{ fontWeight:900, marginBottom:10 }}>已上架商品</div>
+              {products.length === 0 ? (
+                <div style={{ color:"#64748b" }}>目前沒有商品。</div>
+              ) : (
+                <div style={{ display:"grid", gap:10 }}>
+                  {products.map((p)=> (
+                    <div key={p.id} style={styles.item}>
+                      <div style={{ display:"flex", alignItems:"center", gap:12, minWidth:0 }}>
+                        <div style={{ width:72, height:72, borderRadius:12, overflow:"hidden", background:"#f3f4f6", border:"1px solid #eee", flex:"0 0 auto" }}>
+                          {p.imageUrl ? (
+                            <img src={p.imageUrl} alt={p.name} style={{ width:"100%", height:"100%", objectFit:"cover" }} />
+                          ) : (
+                            <div style={{ width:"100%", height:"100%", display:"grid", placeItems:"center", color:"#9ca3af", fontSize:12 }}>No Image</div>
+                          )}
+                        </div>
+                        <div style={{ display:"grid", gap:4, minWidth:0 }}>
+                          <div style={{ fontWeight:800, whiteSpace:"nowrap", textOverflow:"ellipsis", overflow:"hidden" }}>{p.name}</div>
+                          <div style={{ fontSize:12, color:"#6b7280" }}>
+                            分類：{p.category || "-"}　售價：{ntd1(p.price)}{p.original? <span style={{ marginLeft:8, textDecoration:"line-through", color:"#9ca3af" }}>{ntd1(p.original)}</span> : null}
+                          </div>
+                          <div style={{ fontSize:12, color:"#9ca3af" }}>
+                            每筆最低：{p.minQty ?? 1}　上限：{p.stockCapacity ? p.stockCapacity : "不限制"}
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                        <button onClick={()=> startEdit(p)} style={styles.smallBtn}>編輯</button>
+                        <button onClick={()=> onDelete(p.id)} style={styles.dangerBtn}>刪除</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </>
         )}
 
-
-        
+        {/* 付款資訊 */}
         {tab === "payment" && <AdminPaymentInfo />}
-
 
         {/* ── Orders 分頁 ──────────────────────────────── */}
         {tab === "orders" && (
@@ -435,8 +523,9 @@ export default function AdminPanel() {
           </div>
         )}
 
-         {tab === "notice" && (
-         <AdminNoticePanel />
+        {/* 公告 */}
+        {tab === "notice" && (
+          <AdminNoticePanel />
         )}
 
       </div>

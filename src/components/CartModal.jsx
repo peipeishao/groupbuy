@@ -1,4 +1,4 @@
-// src/components/CartModal.jsx — 修正 handleCheckout: ReferenceError min 未定義；其餘維持原行為
+// src/components/CartModal.jsx — 最小變更版：結帳前先鎖庫存（setReservation），其餘維持原行為
 import React, { useEffect, useMemo, useState } from "react";
 import { db, auth } from "../firebase.js";
 import { ref, push, set, get, onValue, runTransaction } from "firebase/database";
@@ -101,10 +101,8 @@ export default function CartModal({ onClose }) {
 
       let nextQty;
       if (typeof deltaOrValue === "number" && Math.abs(deltaOrValue) < 99) {
-        // 按鈕：±1
         nextQty = Math.max(0, (Number(prev?.qty) || 0) + Math.sign(deltaOrValue) * 1);
       } else {
-        // 輸入：取整數
         const raw = Math.max(0, Number(deltaOrValue) || 0);
         nextQty = Math.floor(raw);
       }
@@ -180,7 +178,7 @@ export default function CartModal({ onClose }) {
     return { ok: true, finalItems: kept };
   }
 
-  // 送單（修正：使用 minQ 變數；檢查 ≥ minQty，不要求倍數）
+  // 送單（修正：使用 minQ 變數；新增：結帳前鎖庫存 setReservation；其餘維持原行為）
   const handleCheckout = async () => {
     if (placing || !enriched.length) return;
     if (isAnonymous) {
@@ -194,11 +192,24 @@ export default function CartModal({ onClose }) {
       const { ok, finalItems } = await buildFilteredItemsIfNeeded(enriched);
       if (!ok) { setPlacing(false); return; }
 
-      // 基本 minQty 驗證（修正：使用 minQ 而非未定義的 min）
+      // 基本 minQty 驗證（≥ minQty）
       for (const it of finalItems) {
         const minQ = Math.max(1, Number(it.minQty || 1));
         if (Number(it.qty || 0) > 0 && Number(it.qty || 0) < minQ) {
           alert(`「${it.name}」的數量至少需要 ${minQ}。`);
+          setPlacing(false);
+          return;
+        }
+      }
+
+      // 🔒 新增：結帳前先把購物袋數量鎖到 reservation，確保 finalizeSale 有數量可結轉
+      for (const it of finalItems) {
+        const capacity = Number(it.stockCapacity || 0);
+        const want = Math.max(0, Number(it.qty || 0));
+        const minQ = Math.max(1, Number(it.minQty || 1));
+        const reserved = await setReservation(it.id, want, capacity);
+        if (want > 0 && reserved < minQ) {
+          alert(`「${it.name}」剩餘不足最低下單量 ${minQ}，目前可預留：${reserved}`);
           setPlacing(false);
           return;
         }
