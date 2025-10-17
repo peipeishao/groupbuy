@@ -1,4 +1,3 @@
-// src/components/HUD.jsx
 import React, { useMemo, useState } from "react";
 import { usePlayer } from "../store/playerContext.jsx";
 import { useCart } from "../store/useCart.js";
@@ -13,19 +12,28 @@ import RealNameEditor from "./hud/RealNameEditor.jsx";
 import EmailBinder from "./hud/EmailBinder.jsx";
 import Last5Editor from "./hud/Last5Editor.jsx";
 
+// ✅ 新增：導入寵物視窗
+import PetWindow from "../features/pet/PetWindow.jsx";
+
 const AVATAR_EMOJI = { bunny: "🐰", bear: "🐻", cat: "🐱", duck: "🦆" };
 
 export default function HUD({ onOpenCart }) {
   let player = null;
-  try { player = usePlayer(); } catch (_) {}
+  try {
+    player = usePlayer();
+  } catch (_) {}
 
   const { items } = useCart();
   const [editOpen, setEditOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
+  const [petOpen, setPetOpen] = useState(false); // ✅ 新增：寵物視窗開關
 
   const cartQty = useMemo(
-    () => (Array.isArray(items) ? items.reduce((s, x) => s + (Number(x.qty) || 0), 0) : 0),
+    () =>
+      Array.isArray(items)
+        ? items.reduce((s, x) => s + (Number(x.qty) || 0), 0)
+        : 0,
     [items]
   );
 
@@ -43,7 +51,13 @@ export default function HUD({ onOpenCart }) {
         <img
           src={url}
           alt="me"
-          style={{ width: 28, height: 28, borderRadius: "50%", objectFit: "cover", border: "1px solid #e5e7eb" }}
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: "50%",
+            objectFit: "cover",
+            border: "1px solid #e5e7eb",
+          }}
         />
       );
     }
@@ -54,16 +68,16 @@ export default function HUD({ onOpenCart }) {
     <>
       {/* 右下角 HUD */}
       <div
-  style={{
-    position: "fixed",
-    right: "max(12px, env(safe-area-inset-right))",
-    bottom: "max(12px, env(safe-area-inset-bottom))",
-    zIndex: 1000,
-    display: "grid",
-    gap: 4,
-    minWidth: 200,
-  }}
->
+        style={{
+          position: "fixed",
+          right: "max(12px, env(safe-area-inset-right))",
+          bottom: "max(12px, env(safe-area-inset-bottom))",
+          zIndex: 1000,
+          display: "grid",
+          gap: 4,
+          minWidth: 200,
+        }}
+      >
         {/* 玩家卡片 */}
         <div
           style={{
@@ -79,7 +93,15 @@ export default function HUD({ onOpenCart }) {
         >
           {avatarNode}
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 900, lineHeight: 1.1, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>
+            <div
+              style={{
+                fontWeight: 900,
+                lineHeight: 1.1,
+                whiteSpace: "nowrap",
+                textOverflow: "ellipsis",
+                overflow: "hidden",
+              }}
+            >
               {roleName}
             </div>
             <div style={{ fontSize: 12, color: "#475569" }}>金幣：{coins}</div>
@@ -146,6 +168,22 @@ export default function HUD({ onOpenCart }) {
               height={48}
               onClick={() => setHistoryOpen(true)}
               title="查看我的訂購紀錄"
+            />
+          )}
+
+          {/* ✅ 寵物按鈕 */}
+          {!isAnonymous && (
+            <ImageButton
+              img="/buildings/button-normal.png"
+              imgHover="/buildings/button-light.png"
+              imgActive="/buildings/button-dark.png"
+              label="寵物"
+              labelPos="center"
+              labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
+              width={104}
+              height={48}
+              onClick={() => setPetOpen(true)}
+              title="開啟寵物視窗"
             />
           )}
 
@@ -223,18 +261,28 @@ export default function HUD({ onOpenCart }) {
         </div>
       </div>
 
-      {/* 編輯角色（僅登入者可見） */}
+      {/* 編輯角色 */}
       <ProfileEditor
         open={editOpen && !isAnonymous}
-  onClose={() => setEditOpen(false)}
-  extraAvatarControl={<AvatarUploadInline onUploaded={() => {}} />}
-  extraRealName={<RealNameEditor />}
-  extraLast5={<Last5Editor />}
-  extraEmailBinder={<EmailBinder />}
-/>
+        onClose={() => setEditOpen(false)}
+        extraAvatarControl={<AvatarUploadInline onUploaded={() => {}} />}
+        extraRealName={<RealNameEditor />}
+        extraLast5={<Last5Editor />}
+        extraEmailBinder={<EmailBinder />}
+      />
 
       {/* 訂購紀錄 */}
-      <OrderHistoryModal open={!isAnonymous && historyOpen} onClose={() => setHistoryOpen(false)} />
+      <OrderHistoryModal
+        open={!isAnonymous && historyOpen}
+        onClose={() => setHistoryOpen(false)}
+      />
+
+      {/* ✅ 寵物視窗 */}
+      <PetWindow
+        open={!isAnonymous && petOpen}
+        onClose={() => setPetOpen(false)}
+        meUid={player?.user?.uid}
+      />
 
       {/* 管理商品全畫面 Modal */}
       {adminOpen && (

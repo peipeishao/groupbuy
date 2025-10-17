@@ -1,5 +1,4 @@
-// src/pages/MarketTown.jsx
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import Town from "./Town.jsx";
 import OrdersSummaryTable from "../components/OrdersSummaryTable.jsx";
 import OrderSheetModal from "../components/OrderSheetModal.jsx";
@@ -14,21 +13,26 @@ import { announce } from "../utils/announce.js";
 import { auth, db } from "../firebase.js";
 import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
 import StallStatusSign from "../components/StallStatusSign.jsx";
+import PetFollowers from "../features/pet/PetFollowers.jsx";
 
-// 🐾 寵物系統（方案B）
+//
+// 🐾 寵物系統（新版撿取 API）
+// - 保留你原本的播種/監聽（watchCommunityPoops, plantUserPoop）
+// - 將「靠近就撿」改為 adoptSpawnAsPet（建立 /poops 並寫入 playersPublic/{uid}/pet）
+//
 import {
   ensurePlayerPrivate,
-  ensureDefaultPetPoop,
   watchCommunityPoops,
   plantUserPoop,
-  pickupWildPoop,
-  distance,
+  distance, // 仍沿用你的距離工具
 } from "./petSystem";
 
 import { ref as dbRef, onValue } from "firebase/database";
 
-// === 行動裝置版面修正（不額外建 CSS 檔，直接 inline style） ===
-const DOCK_H = 120; // 預留右下 HUD/底部元件高度，可依實際需要微調
+// ✅ 新增：採用我們第三步建立的 API
+import { adoptSpawnAsPet } from "../features/pet/petPublicApi";
+
+const DOCK_H = 120; // 預留右下 HUD/底部元件高度
 const styles = {
   panelArea: {
     position: "fixed",
@@ -100,10 +104,12 @@ export default function MarketTown() {
   const [cartOpen, setCartOpen] = useState(false);
   const [pmOpen, setPmOpen] = useState(false);
 
-  // 你的玩家位置（若你已在別處有此狀態，改用你的來源）
+  // 我的位置（由 playersPublic/{uid} 同步）
   const [myPos, setMyPos] = useState(null);
+  // ✅ 我是否已經有便便寵物（來自 playersPublic/{uid}/pet）
+  const [myPet, setMyPet] = useState(null);
 
-  // 監聽自己的公開位置（示例：若你已有 playersPublic 的 hook，直接用你的）
+  // 監聽自己的公開位置
   useEffect(() => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
@@ -112,6 +118,16 @@ export default function MarketTown() {
       if (typeof v.x === "number" && typeof v.y === "number") {
         setMyPos({ x: v.x, y: v.y });
       }
+    });
+    return () => off();
+  }, [auth.currentUser?.uid]);
+
+  // ✅ 監聽自己的公開寵物指標（判斷是否已擁有寵物 → 有的話就不再撿）
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const off = onValue(dbRef(db, `playersPublic/${uid}/pet`), (snap) => {
+      setMyPet(snap.val() || null);
     });
     return () => off();
   }, [auth.currentUser?.uid]);
@@ -133,7 +149,6 @@ export default function MarketTown() {
           return;
         }
         await ensurePlayerPrivate();
-        await ensureDefaultPetPoop(); // 可選：預設給一隻便便寵物
         announce("歡迎旅人進入小鎮");
         unsub && unsub();
       } catch (e) {
@@ -144,31 +159,56 @@ export default function MarketTown() {
     return () => { try { unsub && unsub(); } catch {} };
   }, []);
 
-  // 監聽所有人的「臨時便便」播種
-  const [communityPoops, setCommunityPoops] = useState([]); // [{uid,id,x,y,expiresAt}]
+  // 監聽所有人的「臨時便便」播種（仍沿用你的工具）
+  const [communityPoops, setCommunityPoops] = useState([]); // [{uid,id,x,y,expiresAt, createdAt?}]
   useEffect(() => {
     const off = watchCommunityPoops(setCommunityPoops);
     return () => off();
   }, []);
 
-  // 靠近任一顆便便就「撿起」：背包 +1（不刪地圖點，由 expiresAt 自動過期）
+  // ✅ 靠近任一顆「別人」的便便就嘗試認養成寵物（每人僅限 1 隻）
+  //    用 interval 做輕量檢查；加上冷卻避免重複打 API
   useEffect(() => {
     if (!myPos) return;
+    let cooling = false;
+    const PICK_RADIUS = 56;
     const t = setInterval(async () => {
-      // 可加：限制每秒最多撿 N 顆，這裡先簡單處理
+      if (cooling) return;
+      const meUid = auth.currentUser?.uid;
+      if (!meUid) return;
+
+      // 已有寵物就不撿
+      if (myPet && myPet.poopId) return;
+
       for (const p of communityPoops) {
-        if (distance(myPos, p) <= 56) {
-          // spawnId 用 `${uid}:${id}` 當唯一值
-          await pickupWildPoop(`${p.uid}:${p.id}`);
+        // 不能撿自己拉的（前端先擋；規則端也會擋）
+        if (p.uid === meUid) continue;
+
+        if (distance(myPos, p) <= PICK_RADIUS) {
+          cooling = true;
+          try {
+            const res = await adoptSpawnAsPet({
+              meUid,
+              spawn: { uid: p.uid, x: p.x, y: p.y, createdAt: p.createdAt ?? Date.now() }
+            });
+            // 只有成功或「已擁有」才進入短冷卻，避免抖動
+            if (res?.ok || res?.reason === "already_has_pet") {
+              // 可加 toast 提示
+            }
+          } catch (e) {
+            console.warn("[adoptSpawnAsPet] failed:", e);
+          } finally {
+            setTimeout(() => { cooling = false; }, 600);
+          }
+          break;
         }
       }
     }, 300);
     return () => clearInterval(t);
-  }, [myPos, communityPoops]);
+  }, [myPos, communityPoops, myPet]);
 
-  // 在玩家附近播種一顆臨時便便
+  // 在玩家附近播種一顆臨時便便（沿用你現有兩顆上限的策略）
   async function handlePlantNearMe() {
-    // 前端輕量限制：自己同時有效顆數 ≤ 2
     const myUid = auth.currentUser?.uid;
     const mine = communityPoops.filter((p) => p.uid === myUid);
     if (mine.length >= 2) {
@@ -184,7 +224,6 @@ export default function MarketTown() {
     <div style={{ minHeight: "100vh" }}>
       {/* 背景與釘點（兩塊開團時間牌 + 兩顆入口按鈕） */}
       <FullBleedStage bg={BG_URL} baseWidth={1920} baseHeight={1080}>
-        {/* 雞胸肉時間牌（左側上方） */}
         <Pin xPct={47} yPct={24} widthRel={0.10}>
           <div style={{ position: "relative", zIndex: 20, width: "100%" }}>
             <StallStatusSign
@@ -198,7 +237,6 @@ export default function MarketTown() {
             />
           </div>
         </Pin>
-        {/* C文可麗露時間牌（右側上方） */}
         <Pin xPct={65} yPct={24} widthRel={0.10}>
           <div style={{ position: "relative", zIndex: 20, width: "100%" }}>
             <StallStatusSign
@@ -212,6 +250,7 @@ export default function MarketTown() {
             />
           </div>
         </Pin>
+
         {/* 入口按鈕 */}
         {placards.map((p) => (
           <Pin key={p.id} xPct={p.xPct} yPct={p.yPct} widthRel={p.widthRel}>
@@ -225,7 +264,7 @@ export default function MarketTown() {
           </Pin>
         ))}
 
-        {/* 在地圖層渲染大家播的便便（用 emoji 當圖示，避免缺素材） */}
+        {/* 地圖層：大家播的臨時便便（用 emoji 當圖示） */}
         {communityPoops.map((p) => (
           <div key={`${p.uid}:${p.id}`} style={{ position: "absolute", left: p.x, top: p.y }}>
             <div style={styles.poopIcon}>💩</div>
@@ -233,12 +272,15 @@ export default function MarketTown() {
         ))}
       </FullBleedStage>
 
+      {/* ✅ 寵物跟隨層（顯示誰有寵物就跟著誰） */}
+      <PetFollowers />
+
       {/* 小鎮層（原樣） */}
       <div style={{ position: "relative", zIndex: 3 }}>
         <Town />
       </div>
 
-      {/* ✅ 主面板（訂單總覽）：預留底部與安全區、可內滾動，不再壓到 HUD / 聊天框 */}
+      {/* 主面板（訂單總覽） */}
       <div style={styles.panelArea}>
         <div style={styles.card}>
           <div style={styles.hScroll}>
@@ -247,20 +289,20 @@ export default function MarketTown() {
         </div>
       </div>
 
-      {/* ✅ 聊天框：固定左下且避開底部區域 */}
+      {/* 聊天框 */}
       <div style={styles.chatCorner}>
         <ChatBox />
       </div>
 
-      {/* 右下角 HUD（購物袋/登入等） */}
+      {/* 右下角 HUD */}
       <HUD onOpenCart={() => setCartOpen(true)} />
 
-      {/* 便便按鈕（右下；不蓋住 HUD） */}
+      {/* 便便按鈕（右下） */}
       <button style={styles.plantBtn} onClick={handlePlantNearMe} title="播一顆臨時便便（10分鐘）">
         便便 💩
       </button>
 
-      {/* 彈幕/公告：統一放在頂部安全區，不與主面板重疊 */}
+      {/* 彈幕/公告 */}
       <div style={styles.toastStack}>
         <div style={styles.toastItem}>
           <AnnouncementDanmaku lanes={4} rowHeight={38} topOffset={0} durationSec={9} />
