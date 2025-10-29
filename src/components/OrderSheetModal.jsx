@@ -1,27 +1,39 @@
-// src/components/OrderSheetModal.jsx — 綁定 pricing.js（顯示折扣；其他流程維持）
+// src/components/OrderSheetModal.jsx — 修正版（可直接覆蓋）
+// 修正點：
+// 1) 僅在元件頂層呼叫一次 useStallCampaign（避免 React #321）
+// 2) 修正樣式 borderTop 引號
+// 3) calcPriceBreakdown 只傳 items；活動標籤用 DISCOUNT.label
+
 import React, { useEffect, useMemo, useState } from "react";
 import { db, auth } from "../firebase.js";
 import { ref, set, onValue, runTransaction } from "firebase/database";
 import { usePlayer } from "../store/playerContext.jsx";
 import { useCart } from "../store/useCart.js";
 import ReviewModal from "./reviews/ReviewModal.jsx";
-import { ref as dbRef } from "firebase/database"; // for useReviewStats
 
-// ⬇️ 價格工具（共用）
+// 價格工具
 import { DISCOUNT, calcPriceBreakdown, ntd1 } from "../utils/pricing.js";
 
 const fmt = (n) => new Intl.NumberFormat("zh-TW").format(n || 0);
-const fmt1 = (n) => new Intl.NumberFormat("zh-TW", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(n || 0);
+const fmt1 = (n) =>
+  new Intl.NumberFormat("zh-TW", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(
+    n || 0
+  );
 
-/** ===== 攤位 campaign 倒數（原樣保留） ===== */
+/** ===== 攤位 campaign 倒數 ===== */
 function useStallCampaign(stallId) {
   const [camp, setCamp] = useState(null);
   const [tick, setTick] = useState(0);
   useEffect(() => {
     if (!stallId) return;
-    const off = onValue(ref(db, `stalls/${stallId}/campaign`), (snap) => setCamp(snap.val() || null));
+    const off = onValue(ref(db, `stalls/${stallId}/campaign`), (snap) =>
+      setCamp(snap.val() || null)
+    );
     const t = setInterval(() => setTick((x) => (x + 1) % 1e9), 1000);
-    return () => { off && off(); clearInterval(t); };
+    return () => {
+      off && off();
+      clearInterval(t);
+    };
   }, [stallId]);
   const now = Date.now();
   const startAt = camp?.startAt ? Number(camp.startAt) : null;
@@ -36,7 +48,9 @@ function useStallCampaign(stallId) {
     const h = Math.floor(s / 3600);
     const m = Math.floor((s % 3600) / 60);
     const sec = s % 60;
-    return h > 0 ? `${h}:${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}` : `${m}:${String(sec).padStart(2,"0")}`;
+    return h > 0
+      ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
+      : `${m}:${String(sec).padStart(2, "0")}`;
   })();
   return { upcoming, ended, cdText };
 }
@@ -53,18 +67,33 @@ function CountdownBadgeInline({ upcoming, ended, cdText }) {
   if (ended) bg = "#9ca3af";
   const label = upcoming ? "尚未開始" : ended ? "已截止" : `倒數 ${cdText}`;
   return (
-    <span style={{ background: bg, color: "#fff", borderRadius: 999, padding: "4px 10px", fontSize: 12, fontWeight: 800, display: "inline-flex", gap: 6, alignItems: "center" }}>
-      <span role="img" aria-label="timer">⏰</span>{label}
+    <span
+      style={{
+        background: bg,
+        color: "#fff",
+        borderRadius: 999,
+        padding: "4px 10px",
+        fontSize: 12,
+        fontWeight: 800,
+        display: "inline-flex",
+        gap: 6,
+        alignItems: "center",
+      }}
+    >
+      <span role="img" aria-label="timer">
+        ⏰
+      </span>
+      {label}
     </span>
   );
 }
 
-/** 評論統計（原樣保留） */
+/** 評論統計 */
 function useReviewStats(itemId) {
   const [stats, setStats] = useState({ count: 0, avg: 0 });
   useEffect(() => {
     if (!itemId) return;
-    const off = onValue(dbRef(db, `reviews/${itemId}`), (snap) => {
+    const off = onValue(ref(db, `reviews/${itemId}`), (snap) => {
       const v = snap.val() || {};
       const arr = Object.values(v);
       const count = arr.length;
@@ -101,20 +130,37 @@ async function setReservation(productId, targetQty, capacity) {
   return Number(snap?.reservations?.[uid] || 0);
 }
 
-/** 商品卡（原外觀保留；下方僅控制數量） */
+/** 商品卡（外觀保留；下方僅控制數量） */
 function ProductCard({ p, q, onDec, onInc, onInput, onOpenReview }) {
   const stats = useReviewStats(p.id);
   return (
     <div className="card" style={{ padding: 10, borderRadius: 12, border: "1px solid #eee" }}>
       {p.img ? (
-        <img src={p.img} alt={p.name} style={{ width: "100%", height: 120, objectFit: "cover", borderRadius: 10, marginBottom: 6 }} />
+        <img
+          src={p.img}
+          alt={p.name}
+          style={{ width: "100%", height: 120, objectFit: "cover", borderRadius: 10, marginBottom: 6 }}
+        />
       ) : (
-        <div style={{ height: 120, background: "#f1f5f9", borderRadius: 10, display: "grid", placeItems: "center", marginBottom: 6, color: "#64748b", fontSize: 12 }}>
+        <div
+          style={{
+            height: 120,
+            background: "#f1f5f9",
+            borderRadius: 10,
+            display: "grid",
+            placeItems: "center",
+            marginBottom: 6,
+            color: "#64748b",
+            fontSize: 12,
+          }}
+        >
           無圖片
         </div>
       )}
 
-      <div style={{ fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
+      <div style={{ fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {p.name}
+      </div>
 
       <div style={{ margin: "6px 0" }}>
         價格：🪙 {fmt1(p.price)}
@@ -124,10 +170,12 @@ function ProductCard({ p, q, onDec, onInc, onInput, onOpenReview }) {
         {p.unit && <span style={{ marginLeft: 6, color: "#64748b" }}>／{p.unit}</span>}
       </div>
 
-      <div style={{ color:"#64748b", fontSize:12, marginBottom:4 }}>最低下單 {p.minQty}</div>
+      <div style={{ color: "#64748b", fontSize: 12, marginBottom: 4 }}>最低下單 {p.minQty}</div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-        <button type="button" onClick={onDec} className="small-btn">−</button>
+        <button type="button" onClick={onDec} className="small-btn">
+          −
+        </button>
         <input
           value={q}
           onChange={onInput}
@@ -137,13 +185,17 @@ function ProductCard({ p, q, onDec, onInc, onInput, onOpenReview }) {
           min={0}
           style={{ width: 60, textAlign: "center", border: "1px solid #ddd", borderRadius: 8, padding: "6px 4px" }}
         />
-        <button type="button" onClick={onInc} className="small-btn">＋</button>
+        <button type="button" onClick={onInc} className="small-btn">
+          ＋
+        </button>
       </div>
       <div style={{ marginTop: 6, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <button onClick={onOpenReview} style={linkBtn}>查看 / 撰寫評論</button>
+        <button onClick={onOpenReview} style={linkBtn}>
+          查看 / 撰寫評論
+        </button>
         <div title={`平均 ${stats.avg.toFixed(1)}★ / 共 ${stats.count} 則`} style={badgeStyle}>
           <span style={{ fontWeight: 900 }}>★ {stats.avg.toFixed(1)}</span>
-          <span style={{ opacity: .8 }}>（{stats.count}）</span>
+          <span style={{ opacity: 0.8 }}>（{stats.count}）</span>
         </div>
       </div>
     </div>
@@ -154,6 +206,7 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
   const { openLoginGate } = usePlayer();
   const { items: cartAll = [], reload } = useCart();
 
+  // ✅ 僅在元件本體呼叫一次 hook
   const { upcoming, ended, cdText } = useStallCampaign(stallId);
 
   const [available, setAvailable] = useState([]);
@@ -163,20 +216,31 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
   // 本攤位購物袋（原樣保留）
   const [stallCart, setStallCart] = useState([]);
   useEffect(() => {
-    if (!open || !stallId) { setStallCart([]); return; }
+    if (!open || !stallId) {
+      setStallCart([]);
+      return;
+    }
     if (!auth.currentUser) {
       setStallCart(cartAll.filter((it) => String(it.stallId) === String(stallId)));
       return;
     }
     const me = auth.currentUser.uid;
-    const off = onValue(ref(db, `carts/${me}/items`), (snap) => {
-      const v = snap.val() || {};
-      const arr = Object.values(v).filter((it) => String(it.stallId) === String(stallId));
-      setStallCart(arr);
-    }, () => {
-      setStallCart(cartAll.filter((it) => String(it.stallId) === String(stallId)));
-    });
-    return () => { try { off(); } catch {} };
+    const off = onValue(
+      ref(db, `carts/${me}/items`),
+      (snap) => {
+        const v = snap.val() || {};
+        const arr = Object.values(v).filter((it) => String(it.stallId) === String(stallId));
+        setStallCart(arr);
+      },
+      () => {
+        setStallCart(cartAll.filter((it) => String(it.stallId) === String(stallId)));
+      }
+    );
+    return () => {
+      try {
+        off();
+      } catch {}
+    };
   }, [open, stallId, cartAll]);
 
   const total = useMemo(
@@ -184,9 +248,12 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
     [stallCart]
   );
 
-  // 折扣顯示（僅 UI）
-  const { discount: discountAmt, totalAfterDiscount, label: DISCOUNT_LABEL } =
-    useMemo(() => calcPriceBreakdown(stallCart, DISCOUNT), [stallCart]);
+  // 折扣（UI 顯示；實際寫入在送單流程）
+  const { discount: discountAmt, total: totalAfterDiscount } = useMemo(
+    () => calcPriceBreakdown(stallCart),
+    [stallCart]
+  );
+  const DISCOUNT_LABEL = DISCOUNT.label;
 
   // 上半部：每個商品的「待加入數量」
   const [sel, setSel] = useState({});
@@ -199,7 +266,9 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
   // 讀取可選商品（fallback：stalls/{stallId}/items → products/{stallId} → products）
   useEffect(() => {
     if (!open) return;
-    let off1 = null, off2 = null, off3 = null;
+    let off1 = null,
+      off2 = null,
+      off3 = null;
     setLoading(true);
     setSourceLabel("");
     setSel({});
@@ -213,8 +282,10 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
           const v = snap.val();
           if (v && typeof v === "object") {
             const list = Object.entries(v).map(([id, p]) => {
-              const price = p?.price != null ? Number(p.price) : p?.priceGroup != null ? Number(p.priceGroup) : 0;
-              const original = p?.original != null ? Number(p.original) : p?.priceOriginal != null ? Number(p.priceOriginal) : undefined;
+              const price =
+                p?.price != null ? Number(p.price) : p?.priceGroup != null ? Number(p.priceGroup) : 0;
+              const original =
+                p?.original != null ? Number(p.original) : p?.priceOriginal != null ? Number(p.priceOriginal) : undefined;
               return {
                 id,
                 name: String(p?.name ?? ""),
@@ -231,8 +302,16 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
               };
             });
             const filtered = list
-              .filter((it) => it.active && it.price > 0 && (!stallId || String(it.stallId || it.category) === String(stallId)))
-              .sort((a, b) => (b.createdAt - a.createdAt) || String(a.name).localeCompare(String(b.name)));
+              .filter(
+                (it) =>
+                  it.active &&
+                  it.price > 0 &&
+                  (!stallId || String(it.stallId || it.category) === String(stallId))
+              )
+              .sort(
+                (a, b) =>
+                  b.createdAt - a.createdAt || String(a.name).localeCompare(String(b.name))
+              );
             setAvailable(filtered.map(({ active, createdAt, category, ...it }) => it));
             setSourceLabel("products");
           } else {
@@ -241,7 +320,11 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
           }
           setLoading(false);
         },
-        () => { setAvailable([]); setSourceLabel("none"); setLoading(false); }
+        () => {
+          setAvailable([]);
+          setSourceLabel("none");
+          setLoading(false);
+        }
       );
     };
 
@@ -255,8 +338,10 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
           if (v && typeof v === "object") {
             const list = Object.entries(v)
               .map(([id, p]) => {
-                const price = p?.priceGroup != null ? Number(p.priceGroup) : p?.price != null ? Number(p.price) : 0;
-                const original = p?.priceOriginal != null ? Number(p.priceOriginal) : p?.original != null ? Number(p.original) : undefined;
+                const price =
+                  p?.priceGroup != null ? Number(p.priceGroup) : p?.price != null ? Number(p.price) : 0;
+                const original =
+                  p?.priceOriginal != null ? Number(p.priceOriginal) : p?.original != null ? Number(p.original) : undefined;
                 return {
                   id,
                   name: String(p?.name ?? ""),
@@ -271,7 +356,10 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
                 };
               })
               .filter((it) => it.active && it.price > 0)
-              .sort((a, b) => (b.createdAt - a.createdAt) || String(a.name).localeCompare(String(b.name)));
+              .sort(
+                (a, b) =>
+                  b.createdAt - a.createdAt || String(a.name).localeCompare(String(b.name))
+              );
             setAvailable(list.map(({ active, createdAt, ...it }) => it));
             setSourceLabel("products/{stallId}");
             setLoading(false);
@@ -297,7 +385,6 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
               original: it.original != null ? Number(it.original) : undefined,
               img: String(it.img ?? ""),
               unit: String(it.unit ?? "包"),
-              // 此結構通常沒有 minQty/stockCapacity，給預設
               minQty: 1,
               stockCapacity: 0,
             }))
@@ -316,20 +403,24 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
       () => useProductsByStall()
     );
 
-    return () => { off1 && off1(); off2 && off2(); off3 && off3(); };
+    return () => {
+      off1 && off1();
+      off2 && off2();
+      off3 && off3();
+    };
   }, [open, stallId]);
 
   /** 加入購物袋：以「本次目標量」覆寫（不累加），並預留庫存 */
   const addSelectedToCart = async () => {
     try {
-      const { upcoming, ended } = useStallCampaign(stallId);
       if (ended || upcoming) {
         alert(upcoming ? "此攤尚未開始，暫時無法加入。" : "此攤已截止，無法加入。");
         return;
       }
       const me = auth.currentUser?.uid;
       if (!me) {
-        openLoginGate?.({ mode: "upgrade" });
+        // 先引導登入
+        if (typeof openLoginGate === "function") openLoginGate({ mode: "upgrade" });
         return;
       }
       const now = Date.now();
@@ -375,24 +466,69 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
   if (!open) return null;
 
   return (
-    <div onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 1000, display: "grid", placeItems: "center", padding: 12 }}>
-      <div onClick={(e) => e.stopPropagation()}
-        style={{ width: "min(980px, 96vw)", background: "#fff", borderRadius: 16, border: "1px solid #eee", boxShadow: "0 20px 48px rgba(0,0,0,.2)", display: "grid", gridTemplateRows: "56px 1fr auto", maxHeight: "88vh", overflow: "hidden" }}>
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,.45)",
+        zIndex: 1000,
+        display: "grid",
+        placeItems: "center",
+        padding: 12,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(980px, 96vw)",
+          background: "#fff",
+          borderRadius: 16,
+          border: "1px solid #eee",
+          boxShadow: "0 20px 48px rgba(0,0,0,.2)",
+          display: "grid",
+          gridTemplateRows: "56px 1fr auto",
+          maxHeight: "88vh",
+          overflow: "hidden",
+        }}
+      >
         {/* 標題列 */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 14px", borderBottom: "1px solid #eee", background: "#f9fafb" }}>
-          <h3 style={{ margin: 0 }}>攤位：{stallId || "全部"}　|　購物清單</h3>
-          <CountdownBadgeInline {...useStallCampaign(stallId)} />
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "0 14px",
+            borderBottom: "1px solid #eee",
+            background: "#f9fafb",
+          }}
+        >
+          <h3 style={{ margin: 0 }}>
+            攤位：{stallId || "全部"}　|　購物清單
+          </h3>
+          <CountdownBadgeInline upcoming={upcoming} ended={ended} cdText={cdText} />
         </div>
 
         {/* 單一可滾動內容 */}
         <div style={{ overflow: "auto", minHeight: 0 }}>
           {/* 可選商品 */}
           <section style={{ padding: 14, borderBottom: "1px solid #f0f0f0" }}>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 8, gap: 12 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "baseline",
+                justifyContent: "space-between",
+                marginBottom: 8,
+                gap: 12,
+              }}
+            >
               <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
                 <div style={{ fontWeight: 800 }}>可選商品</div>
-                {sourceLabel && (<div style={{ fontSize: 12, color: "#64748b" }}>來源：<code>{sourceLabel}</code></div>)}
+                {sourceLabel && (
+                  <div style={{ fontSize: 12, color: "#64748b" }}>
+                    來源：<code>{sourceLabel}</code>
+                  </div>
+                )}
               </div>
               <div style={{ fontSize: 12, color: "#475569" }}>
                 已選 <b>{selTotalQty}</b> 件
@@ -443,7 +579,11 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
               </thead>
               <tbody>
                 {stallCart.length === 0 ? (
-                  <tr><td colSpan="4" style={{ padding: 12, textAlign: "center", color: "#888" }}>購物袋目前沒有品項</td></tr>
+                  <tr>
+                    <td colSpan="4" style={{ padding: 12, textAlign: "center", color: "#888" }}>
+                      購物袋目前沒有品項
+                    </td>
+                  </tr>
                 ) : (
                   stallCart.map((it, i) => {
                     const sub = Number(it.price || 0) * Number(it.qty || 0);
@@ -474,12 +614,29 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
         </div>
 
         {/* 底部操作 */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderTop: "1px solid #eee", background: "#fff" }}>
-          <button onClick={onClose} style={opBtn}>關閉</button>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "10px 14px",
+            borderTop: "1px solid #eee",
+            background: "#fff",
+          }}
+        >
+          <button onClick={onClose} style={opBtn}>
+            關閉
+          </button>
           <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
-            <div>小計：<b>{fmt1(total)}</b></div>
-            <div>折後：<b>{ntd1(totalAfterDiscount)}</b></div>
-            <button onClick={addSelectedToCart} style={primaryBtn}>加入購物袋</button>
+            <div>
+              小計：<b>{fmt1(total)}</b>
+            </div>
+            <div>
+              折後：<b>{ntd1(totalAfterDiscount)}</b>
+            </div>
+            <button onClick={addSelectedToCart} style={primaryBtn}>
+              加入購物袋
+            </button>
           </div>
         </div>
       </div>
@@ -497,7 +654,35 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
 }
 
 /* styles */
-const primaryBtn = { padding: "8px 12px", borderRadius: 10, border: "2px solid #111", background: "#fff", fontWeight: 900, cursor: "pointer" };
-const opBtn = { padding: "8px 12px", borderRadius: 10, border: "1px solid #ddd", background: "#fff", cursor: "pointer" };
-const linkBtn = { padding: "6px 8px", borderRadius: 8, border: "1px solid #ddd", background: "#fff", cursor: "pointer" };
-const badgeStyle = { display: "inline-flex", alignItems: "center", gap: 6, padding: "2px 8px", background: "#f1f5f9", color: "#0f172a", borderRadius: 999, fontSize: 12 };
+const primaryBtn = {
+  padding: "8px 12px",
+  borderRadius: 10,
+  border: "2px solid #111",
+  background: "#fff",
+  fontWeight: 900,
+  cursor: "pointer",
+};
+const opBtn = {
+  padding: "8px 12px",
+  borderRadius: 10,
+  border: "1px solid #ddd",
+  background: "#fff",
+  cursor: "pointer",
+};
+const linkBtn = {
+  padding: "6px 8px",
+  borderRadius: 8,
+  border: "1px solid #ddd",
+  background: "#fff",
+  cursor: "pointer",
+};
+const badgeStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "2px 8px",
+  background: "#f1f5f9",
+  color: "#0f172a",
+  borderRadius: 999,
+  fontSize: 12,
+};
