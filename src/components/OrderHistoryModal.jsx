@@ -1,7 +1,4 @@
-// src/components/OrderHistoryModal.jsx — 可覆蓋版（最小更動）
-// 變更點：saveEdit() 內，數量為 0 的品項改以刪除節點（設為 null），符合 rules：qty >= 1。
-// 其餘維持原行為：分「本次開團 / 歷史」、未付款可編輯、僅有折扣欄位才顯示折扣區塊。
-
+// src/components/OrderHistoryModal.jsx — 可覆蓋版（數量變更同步重算折扣）
 import React, { useEffect, useMemo, useState } from "react";
 import { db } from "../firebase.js";
 import {
@@ -14,6 +11,36 @@ import {
 } from "firebase/database";
 import { usePlayer } from "../store/playerContext.jsx";
 import { ntd1 } from "../utils/pricing.js";
+
+/* ---- 折扣/金額計算 ---- */
+function calcPriceFields(orderLike, items) {
+  const list = Array.isArray(items) ? items : [];
+  const subtotal = list.reduce(
+    (s, it) => s + Number(it.price || 0) * Number(it.qty || 0),
+    0
+  );
+  const totalQty = list.reduce((s, it) => s + Number(it.qty || 0), 0);
+
+  const meta = orderLike?.discountMeta || {};
+  let discount = 0;
+
+  if (typeof meta.perItem === "number") {
+    // 每件折抵：perItem * 總數量
+    discount = Math.max(0, Number(meta.perItem) * totalQty);
+  } else if (typeof meta.percent === "number") {
+    // 百分比折扣：subtotal * 百分比
+    const p = Math.max(0, Math.min(100, Number(meta.percent)));
+    discount = Math.round((subtotal * p) / 100);
+  } else if (typeof orderLike?.discount === "number") {
+    // 沒有規則就沿用原本的折扣（避免把舊資料清掉）
+    discount = Math.max(0, Number(orderLike.discount));
+  } else {
+    discount = 0;
+  }
+
+  const totalAfterDiscount = Math.max(0, subtotal - discount);
+  return { subtotal, discount, totalAfterDiscount };
+}
 
 /* ---- 通用 Modal ---- */
 function Modal({ open, onClose, title = "訂購紀錄", children }) {
@@ -80,42 +107,43 @@ function DiscountBlock({ orderLike, items, isEditing }) {
     typeof orderLike?.subtotal === "number" ||
     typeof orderLike?.discount === "number" ||
     typeof orderLike?.totalAfterDiscount === "number" ||
-    (orderLike?.discountMeta && orderLike?.discountMeta?.perItem != null);
+    (orderLike?.discountMeta &&
+      (orderLike?.discountMeta?.perItem != null ||
+        orderLike?.discountMeta?.percent != null));
 
   if (!hasDiscountField) return null;
 
-  // 編輯時的小計即時計算；非編輯則用 DB 的 subtotal（若無則回退即時計算）
-  const liveSubtotal = (Array.isArray(items) ? items : []).reduce(
-    (s, it) => s + Number(it.price || 0) * Number(it.qty || 0),
-    0
-  );
-  const subtotal = isEditing
-    ? liveSubtotal
-    : typeof orderLike?.subtotal === "number"
-    ? orderLike.subtotal
-    : liveSubtotal;
-
-  const discount =
-    typeof orderLike?.discount === "number" ? orderLike.discount : 0;
-
-  const payable =
-    typeof orderLike?.totalAfterDiscount === "number"
-      ? orderLike.totalAfterDiscount
-      : Math.max(0, subtotal - discount);
+  const live = calcPriceFields(orderLike, items);
+  const show = isEditing
+    ? live
+    : {
+        subtotal:
+          typeof orderLike?.subtotal === "number"
+            ? orderLike.subtotal
+            : live.subtotal,
+        discount:
+          typeof orderLike?.discount === "number"
+            ? orderLike.discount
+            : live.discount,
+        totalAfterDiscount:
+          typeof orderLike?.totalAfterDiscount === "number"
+            ? orderLike.totalAfterDiscount
+            : live.totalAfterDiscount,
+      };
 
   const label = orderLike?.discountMeta?.label || "折扣活動";
 
   return (
     <div style={{ textAlign: "right", marginTop: 8 }}>
       <div style={{ color: "#111", fontWeight: 800 }}>
-        小計　{ntd1(subtotal)}
+        小計　{ntd1(show.subtotal)}
       </div>
       <div style={{ fontSize: 12, color: "#64748b" }}>{label}</div>
       <div style={{ marginTop: 2, color: "#16a34a", fontWeight: 800 }}>
-        活動折扣　- {ntd1(discount)}
+        活動折扣　- {ntd1(show.discount)}
       </div>
       <div style={{ marginTop: 2, color: "#111", fontWeight: 900 }}>
-        折扣後總額　{ntd1(payable)}
+        折扣後總額　{ntd1(show.totalAfterDiscount)}
       </div>
     </div>
   );
@@ -126,7 +154,7 @@ export default function OrderHistoryModal({ open, onClose }) {
   const { uid } = usePlayer() || {};
   const [orders, setOrders] = useState([]);
   const [campaign, setCampaign] = useState({ updatedAt: 0 });
-  const [editing, setEditing] = useState(null); // { id, paid, items:[{...}], orig:[{...}] }
+  const [editing, setEditing] = useState(null); // { id, paid, items:[{...}], orig:[{...}], meta, base }
 
   // 讀取我的訂單 & 當前開團分界時間
   useEffect(() => {
@@ -171,6 +199,12 @@ export default function OrderHistoryModal({ open, onClose }) {
       paid: !!o.paid,
       items: itemsArray.map((x) => ({ ...x, qty: Number(x.qty || 0) })), // 可編輯
       orig: itemsArray.map((x) => ({ ...x, qty: Number(x.qty || 0) })), // 原始值
+      meta: o.discountMeta || {},
+      base: {
+        subtotal: o.subtotal,
+        discount: o.discount,
+        totalAfterDiscount: o.totalAfterDiscount,
+      },
     });
   };
   const cancelEdit = () => setEditing(null);
@@ -195,13 +229,23 @@ export default function OrderHistoryModal({ open, onClose }) {
       }
     }
 
-    // 以剩餘品項（qty>0）重算「未折扣小計」total（沿用舊欄位語意）
-    const itemsForTotal = curr.filter((x) => Number(x.qty) > 0);
-    const newTotal = itemsForTotal.reduce(
+    // 用目前品項重算金額（含折扣）
+    const itemsForCalc = curr.filter((x) => Number(x.qty) > 0);
+    const { subtotal, discount, totalAfterDiscount } = calcPriceFields(
+      { discountMeta: editing.meta, discount: editing.base?.discount },
+      itemsForCalc
+    );
+
+    // 舊欄位 total（未折扣小計）若仍有使用，維持寫入
+    const legacyTotal = itemsForCalc.reduce(
       (s, it) => s + Number(it.price || 0) * Number(it.qty || 0),
       0
     );
-    updates[`${orderPath}/total`] = newTotal;
+
+    updates[`${orderPath}/total`] = legacyTotal;
+    updates[`${orderPath}/subtotal`] = subtotal;
+    updates[`${orderPath}/discount`] = discount;
+    updates[`${orderPath}/totalAfterDiscount`] = totalAfterDiscount;
 
     try {
       await rtdbUpdate(dbRef(db), updates);
