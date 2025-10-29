@@ -1,4 +1,4 @@
-// src/components/OrderSheetModal.jsx — 修正：minQty 首次跳門檻、之後 +1；加入購物袋以本次目標量覆寫；修掉重複宣告
+// src/components/OrderSheetModal.jsx — 綁定 pricing.js（顯示折扣；其他流程維持）
 import React, { useEffect, useMemo, useState } from "react";
 import { db, auth } from "../firebase.js";
 import { ref, set, onValue, runTransaction } from "firebase/database";
@@ -7,9 +7,11 @@ import { useCart } from "../store/useCart.js";
 import ReviewModal from "./reviews/ReviewModal.jsx";
 import { ref as dbRef } from "firebase/database"; // for useReviewStats
 
+// ⬇️ 價格工具（共用）
+import { DISCOUNT, calcPriceBreakdown, ntd1 } from "../utils/pricing.js";
+
 const fmt = (n) => new Intl.NumberFormat("zh-TW").format(n || 0);
-const fmt1 = (n) =>
-  new Intl.NumberFormat("zh-TW", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(n || 0);
+const fmt1 = (n) => new Intl.NumberFormat("zh-TW", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(n || 0);
 
 /** ===== 攤位 campaign 倒數（原樣保留） ===== */
 function useStallCampaign(stallId) {
@@ -27,7 +29,6 @@ function useStallCampaign(stallId) {
   const statusRaw = String(camp?.status || "ongoing");
   const upcoming = startAt && now < startAt;
   const ended = (closeAt && now >= closeAt) || statusRaw === "ended";
-  const msLeft = closeAt ? Math.max(0, closeAt - now) : null;
   const cdText = (() => {
     if (!closeAt) return "-";
     if (ended) return "已截止";
@@ -41,12 +42,12 @@ function useStallCampaign(stallId) {
 }
 
 function CountdownBadgeInline({ upcoming, ended, cdText }) {
-  let bg = "#22c55e"; // 綠
+  let bg = "#22c55e";
   if (cdText !== "-" && !ended) {
     const parts = cdText.split(":").map(Number);
     const totalMin = parts.length === 3 ? parts[0] * 60 + parts[1] : parts[0];
-    if (totalMin <= 120 && totalMin > 30) bg = "#f59e0b"; // 橘
-    if (totalMin <= 30) bg = "#ef4444"; // 紅
+    if (totalMin <= 120 && totalMin > 30) bg = "#f59e0b";
+    if (totalMin <= 30) bg = "#ef4444";
   }
   if (upcoming) bg = "#3b82f6";
   if (ended) bg = "#9ca3af";
@@ -57,7 +58,6 @@ function CountdownBadgeInline({ upcoming, ended, cdText }) {
     </span>
   );
 }
-/** ===== /倒數 ===== */
 
 /** 評論統計（原樣保留） */
 function useReviewStats(itemId) {
@@ -81,7 +81,6 @@ async function setReservation(productId, targetQty, capacity) {
   const uid = auth.currentUser?.uid;
   if (!uid) throw new Error("尚未登入");
   const cap = Number(capacity || 0);
-
   if (!cap) {
     await set(ref(db, `stock/${productId}/reservations/${uid}`), Math.max(0, Number(targetQty || 0)));
     return Math.max(0, Number(targetQty || 0));
@@ -127,7 +126,6 @@ function ProductCard({ p, q, onDec, onInc, onInput, onOpenReview }) {
 
       <div style={{ color:"#64748b", fontSize:12, marginBottom:4 }}>最低下單 {p.minQty}</div>
 
-      {/* 數量控制：第一次按＋跳到 minQty，其後 +1 */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
         <button type="button" onClick={onDec} className="small-btn">−</button>
         <input
@@ -142,15 +140,12 @@ function ProductCard({ p, q, onDec, onInc, onInput, onOpenReview }) {
         <button type="button" onClick={onInc} className="small-btn">＋</button>
       </div>
       <div style={{ marginTop: 6, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-  <button onClick={onOpenReview} style={linkBtn}>查看 / 撰寫評論</button>
-  <div
-    title={`平均 ${stats.avg.toFixed(1)}★ / 共 ${stats.count} 則`}
-    style={badgeStyle}
-  >
-    <span style={{ fontWeight: 900 }}>★ {stats.avg.toFixed(1)}</span>
-    <span style={{ opacity: .8 }}>（{stats.count}）</span>
-  </div>
-</div>
+        <button onClick={onOpenReview} style={linkBtn}>查看 / 撰寫評論</button>
+        <div title={`平均 ${stats.avg.toFixed(1)}★ / 共 ${stats.count} 則`} style={badgeStyle}>
+          <span style={{ fontWeight: 900 }}>★ {stats.avg.toFixed(1)}</span>
+          <span style={{ opacity: .8 }}>（{stats.count}）</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -188,6 +183,10 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
     () => stallCart.reduce((s, x) => s + (Number(x.price) || 0) * (Number(x.qty) || 0), 0),
     [stallCart]
   );
+
+  // 折扣顯示（僅 UI）
+  const { discount: discountAmt, totalAfterDiscount, label: DISCOUNT_LABEL } =
+    useMemo(() => calcPriceBreakdown(stallCart, DISCOUNT), [stallCart]);
 
   // 上半部：每個商品的「待加入數量」
   const [sel, setSel] = useState({});
@@ -323,6 +322,7 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
   /** 加入購物袋：以「本次目標量」覆寫（不累加），並預留庫存 */
   const addSelectedToCart = async () => {
     try {
+      const { upcoming, ended } = useStallCampaign(stallId);
       if (ended || upcoming) {
         alert(upcoming ? "此攤尚未開始，暫時無法加入。" : "此攤已截止，無法加入。");
         return;
@@ -338,21 +338,17 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
         const chosen = Number(sel[it.id]) || 0;
         if (chosen <= 0) continue;
 
-        // 規則：>0 且 < minQty → 自動補到 minQty；其餘整數照填
         const minQty = Math.max(1, Number(it.minQty || 1));
         let targetQty = Math.max(0, Math.floor(chosen));
         if (targetQty > 0 && targetQty < minQty) targetQty = minQty;
 
-        // 預留（有上限→transaction，無上限→直接寫）
         const finalReserved = await setReservation(it.id, targetQty, it.stockCapacity);
 
-        // 若剩餘不足（finalReserved < minQty 但 >0），提示後略過
         if (finalReserved > 0 && finalReserved < Math.min(targetQty, minQty)) {
           alert(`「${it.name}」剩餘不足最低下單量 ${minQty}，目前可預留：${finalReserved}`);
           if (finalReserved < minQty) continue;
         }
 
-        // 同步購物袋（覆寫，而非累加）
         const key = `${stallId}|${it.id}`;
         if (finalReserved <= 0) {
           await set(ref(db, `carts/${me}/items/${key}`), null);
@@ -386,7 +382,7 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
         {/* 標題列 */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 14px", borderBottom: "1px solid #eee", background: "#f9fafb" }}>
           <h3 style={{ margin: 0 }}>攤位：{stallId || "全部"}　|　購物清單</h3>
-          <CountdownBadgeInline upcoming={upcoming} ended={ended} cdText={cdText} />
+          <CountdownBadgeInline {...useStallCampaign(stallId)} />
         </div>
 
         {/* 單一可滾動內容 */}
@@ -419,21 +415,12 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
                       key={p.id}
                       p={p}
                       q={q}
-                      onDec={() => {
-                        // 往下：<= 門檻直接歸 0，否則 -1
-                        const next = curQty <= productMinQty ? 0 : curQty - 1;
-                        setQty(p.id, next);
-                      }}
-                      onInc={() => {
-                        // 往上：未達門檻先跳到門檻，之後每次 +1
-                        const next = curQty < productMinQty ? productMinQty : curQty + 1;
-                        setQty(p.id, next);
-                      }}
+                      onDec={() => setSel((s) => ({ ...s, [p.id]: curQty <= productMinQty ? 0 : curQty - 1 }))}
+                      onInc={() => setSel((s) => ({ ...s, [p.id]: curQty < productMinQty ? productMinQty : curQty + 1 }))}
                       onInput={(e) => {
-                        // 手動輸入：若介於 1..(minQty-1) 自動補到 minQty
                         const raw = Math.max(0, Math.floor(Number(e.target.value) || 0));
                         const next = raw > 0 && raw < productMinQty ? productMinQty : raw;
-                        setQty(p.id, next);
+                        setSel((s) => ({ ...s, [p.id]: next }));
                       }}
                       onOpenReview={() => setReviewItem({ id: p.id, name: p.name })}
                     />
@@ -443,7 +430,7 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
             )}
           </section>
 
-          {/* 已加入購物袋（原樣保留） */}
+          {/* 已加入購物袋 */}
           <section style={{ padding: 16 }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead style={{ background: "#fafafa" }}>
@@ -451,64 +438,66 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
                   <th style={{ textAlign: "left", padding: 8 }}>品項</th>
                   <th style={{ textAlign: "right", padding: 8, width: 80 }}>單價</th>
                   <th style={{ textAlign: "right", padding: 8, width: 80 }}>數量</th>
-                  <th style={{ textAlign: "right", padding: 8, width: 120 }}>小計</th>
+                  <th style={{ textAlign: "right", padding: 8, width: 110 }}>小計</th>
                 </tr>
               </thead>
               <tbody>
                 {stallCart.length === 0 ? (
-                  <tr>
-                    <td colSpan="4" style={{ padding: 12, textAlign: "center", color: "#888" }}>這個攤位的購物袋目前沒有品項</td>
-                  </tr>
+                  <tr><td colSpan="4" style={{ padding: 12, textAlign: "center", color: "#888" }}>購物袋目前沒有品項</td></tr>
                 ) : (
-                  stallCart.map((it) => {
-                    const sub = (Number(it.price) || 0) * (Number(it.qty) || 0);
+                  stallCart.map((it, i) => {
+                    const sub = Number(it.price || 0) * Number(it.qty || 0);
                     return (
-                      <tr key={`${it.stallId}|${it.id}`} style={{ borderTop: "1px solid #f0f0f0" }}>
+                      <tr key={i}>
                         <td style={{ padding: 8 }}>{it.name}</td>
-                        <td style={{ padding: 8, textAlign: "right" }}>{fmt1(it.price)}</td>
-                        <td style={{ padding: 8, textAlign: "right" }}>{it.qty}</td>
-                        <td style={{ padding: 8, textAlign: "right", fontWeight: 700 }}>{fmt1(sub)}</td>
+                        <td style={{ padding: 8, textAlign: "right" }}>{fmt1(it.price || 0)}</td>
+                        <td style={{ padding: 8, textAlign: "right" }}>{Number(it.qty || 0)}</td>
+                        <td style={{ padding: 8, textAlign: "right" }}>{fmt1(sub)}</td>
                       </tr>
                     );
                   })
                 )}
               </tbody>
             </table>
-            <div style={{ textAlign: "right", marginTop: 8, color: "#111", fontWeight: 800 }}>
-              合計 NT$ {fmt1(total)}
+
+            {/* 折扣列（僅顯示，不寫 DB） */}
+            <div style={{ textAlign: "right", marginTop: 8 }}>
+              <div style={{ fontSize: 12, color: "#64748b" }}>{DISCOUNT_LABEL}</div>
+              <div style={{ marginTop: 2, color: "#16a34a", fontWeight: 800 }}>
+                活動折扣　- {ntd1(discountAmt)}
+              </div>
+              <div style={{ marginTop: 2, color: "#111", fontWeight: 900 }}>
+                折扣後總額　{ntd1(totalAfterDiscount)}
+              </div>
             </div>
           </section>
         </div>
 
-        {/* 底部動作列 */}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "10px 16px 16px" }}>
-          <button
-            onClick={addSelectedToCart}
-            disabled={loading || selTotalQty <= 0 || ended || upcoming}
-            style={{ padding: "10px 16px", borderRadius: 12, border: "2px solid #111", background: "#fff", fontWeight: 800, cursor: selTotalQty > 0 && !ended && !upcoming ? "pointer" : "not-allowed" }}
-            title={ended ? "此攤已截止" : upcoming ? "尚未開始" : (selTotalQty > 0 ? `加入 ${selTotalQty} 件到購物袋` : "請先在上方選擇數量")}
-          >
-            加入購物袋
-          </button>
-
-          <button onClick={onClose} style={{ padding: "10px 16px", borderRadius: 12 }}>關閉</button>
+        {/* 底部操作 */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderTop: "1px solid #eee", background: "#fff" }}>
+          <button onClick={onClose} style={opBtn}>關閉</button>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+            <div>小計：<b>{fmt1(total)}</b></div>
+            <div>折後：<b>{ntd1(totalAfterDiscount)}</b></div>
+            <button onClick={addSelectedToCart} style={primaryBtn}>加入購物袋</button>
+          </div>
         </div>
       </div>
 
-      {reviewItem && <ReviewModal open itemId={reviewItem.id} itemName={reviewItem.name} onClose={() => setReviewItem(null)} />}
+      {reviewItem && (
+        <ReviewModal
+          open={!!reviewItem}
+          onClose={() => setReviewItem(null)}
+          itemId={reviewItem.id}
+          itemName={reviewItem.name}
+        />
+      )}
     </div>
   );
 }
 
-const linkBtn = { marginLeft: 10, border: "none", background: "transparent", color: "#2563eb", cursor: "pointer", textDecoration: "underline" };
-const badgeStyle = {
-  display: "inline-flex",
-  gap: 6,
-  alignItems: "center",
-  padding: "2px 8px",
-  borderRadius: 999,
-  fontSize: 12,
-  border: "1px solid #e5e7eb",
-  background: "#f8fafc",
-  color: "#111827",
-};
+/* styles */
+const primaryBtn = { padding: "8px 12px", borderRadius: 10, border: "2px solid #111", background: "#fff", fontWeight: 900, cursor: "pointer" };
+const opBtn = { padding: "8px 12px", borderRadius: 10, border: "1px solid #ddd", background: "#fff", cursor: "pointer" };
+const linkBtn = { padding: "6px 8px", borderRadius: 8, border: "1px solid #ddd", background: "#fff", cursor: "pointer" };
+const badgeStyle = { display: "inline-flex", alignItems: "center", gap: 6, padding: "2px 8px", background: "#f1f5f9", color: "#0f172a", borderRadius: 999, fontSize: 12 };
