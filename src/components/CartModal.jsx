@@ -1,4 +1,4 @@
-// src/components/CartModal.jsx — 最小變更版：結帳前先鎖庫存（setReservation），其餘維持原行為
+// src/components/CartModal.jsx — 綁定 pricing.js（寫入折扣欄位；保留原流程）
 import React, { useEffect, useMemo, useState } from "react";
 import { db, auth } from "../firebase.js";
 import { ref, push, set, get, onValue, runTransaction } from "firebase/database";
@@ -6,8 +6,10 @@ import { usePlayer } from "../store/playerContext.jsx";
 import { useCart } from "../store/useCart.js";
 import { announce } from "../utils/announce.js";
 
-const fmt1 = (n) =>
-  new Intl.NumberFormat("zh-TW", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(Number(n) || 0);
+// ⬇️ 改用共用 pricing 工具
+import { DISCOUNT, calcPriceBreakdown, makeDiscountMeta, ntd1 } from "../utils/pricing.js";
+
+const fmt1 = (n) => new Intl.NumberFormat("zh-TW", { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(Number(n) || 0);
 
 function useProductsMap() {
   const [map, setMap] = useState(new Map());
@@ -21,7 +23,6 @@ function useProductsMap() {
   return map;
 }
 
-// 將我的 reservation 設為 target（有上限用 tx）
 async function setReservation(productId, targetQty, capacity) {
   const uid = auth.currentUser?.uid;
   if (!uid) throw new Error("尚未登入");
@@ -46,7 +47,6 @@ async function setReservation(productId, targetQty, capacity) {
   return Number(newNode?.reservations?.[uid] || 0);
 }
 
-// 結帳：把我的 reservation 結轉到 soldCount
 async function finalizeSale(productId, uid) {
   const nodeRef = ref(db, `stock/${productId}`);
   const tx = await runTransaction(nodeRef, (data) => {
@@ -72,12 +72,13 @@ export default function CartModal({ onClose }) {
   const myAvatar = avatar || "bunny";
   const myAvatarUrl = null;
 
-  const total = useMemo(
+  // 小計（沿用原 total 的概念）
+  const subtotal = useMemo(
     () => items.reduce((s, x) => s + (Number(x.price) || 0) * (Number(x.qty) || 0), 0),
     [items]
   );
 
-  // 依產品資料補上 minQty/stockCapacity（若沒有則給預設）
+  // 補充產品資訊
   const enriched = items.map((it) => {
     const p = productsMap.get(String(it.id)) || {};
     return {
@@ -89,7 +90,11 @@ export default function CartModal({ onClose }) {
     };
   });
 
-  // 數量調整：步進 1；若 >0 且 < minQty → 自動補到 minQty；並同步預留量
+  // 折扣（改用 pricing.js）
+  const { discount: discountAmt, totalAfterDiscount, label: DISCOUNT_LABEL } =
+    useMemo(() => calcPriceBreakdown(enriched, DISCOUNT), [enriched]);
+
+  // 數量調整 / 移除（沿用）
   const changeQty = async (stallId, id, deltaOrValue) => {
     try {
       const me = auth.currentUser?.uid;
@@ -108,7 +113,6 @@ export default function CartModal({ onClose }) {
       }
       if (nextQty > 0 && nextQty < minQ) nextQty = minQ;
 
-      // 先更新預留量
       const finalReserved = await setReservation(id, nextQty, capacity);
 
       if (finalReserved <= 0) {
@@ -133,7 +137,6 @@ export default function CartModal({ onClose }) {
     }
   };
 
-  // 移除：同步釋放我的預留
   const removeItem = async (stallId, id) => {
     try {
       const me = auth.currentUser?.uid;
@@ -149,7 +152,7 @@ export default function CartModal({ onClose }) {
     }
   };
 
-  /** 送單前檢查每攤是否已截止（保留原功能） */
+  // 關單檢查（沿用）
   async function buildFilteredItemsIfNeeded(items0) {
     const uniqueStalls = Array.from(new Set(items0.map((i) => String(i.stallId))));
     const closedMap = {};
@@ -178,7 +181,7 @@ export default function CartModal({ onClose }) {
     return { ok: true, finalItems: kept };
   }
 
-  // 送單（修正：使用 minQ 變數；新增：結帳前鎖庫存 setReservation；其餘維持原行為）
+  // 送單：寫入折扣欄位（其餘沿用）
   const handleCheckout = async () => {
     if (placing || !enriched.length) return;
     if (isAnonymous) {
@@ -188,11 +191,9 @@ export default function CartModal({ onClose }) {
     try {
       setPlacing(true);
 
-      // 關單檢查
       const { ok, finalItems } = await buildFilteredItemsIfNeeded(enriched);
       if (!ok) { setPlacing(false); return; }
 
-      // 基本 minQty 驗證（≥ minQty）
       for (const it of finalItems) {
         const minQ = Math.max(1, Number(it.minQty || 1));
         if (Number(it.qty || 0) > 0 && Number(it.qty || 0) < minQ) {
@@ -202,7 +203,6 @@ export default function CartModal({ onClose }) {
         }
       }
 
-      // 🔒 新增：結帳前先把購物袋數量鎖到 reservation，確保 finalizeSale 有數量可結轉
       for (const it of finalItems) {
         const capacity = Number(it.stockCapacity || 0);
         const want = Math.max(0, Number(it.qty || 0));
@@ -215,19 +215,16 @@ export default function CartModal({ onClose }) {
         }
       }
 
-      // 讀取 realName
       let realName = "";
       try {
         const snap = await get(ref(db, `playersPrivate/${uid}/realName`));
         realName = String(snap.val() || "");
       } catch {}
 
-      // 先把每個商品的 reservation 結轉到 soldCount，並清空我的 reservation
       for (const it of finalItems) {
         await finalizeSale(it.id, uid);
       }
 
-      // 建立訂單
       const orderRef = push(ref(db, "orders"));
       const orderItems = finalItems.map((it) => ({
         stallId: it.stallId,
@@ -236,13 +233,24 @@ export default function CartModal({ onClose }) {
         price: Number(it.price) || 0,
         qty: Number(it.qty) || 0,
       }));
-      const orderTotal = orderItems.reduce((s, x) => s + (Number(x.price)||0)*(Number(x.qty)||0), 0);
+
+      // 用 pricing.js 產出折扣明細
+      const breakdown = calcPriceBreakdown(orderItems, DISCOUNT);
 
       const payload = {
         uid,
         orderedBy: { uid, roleName: roleName || "旅人", avatar: myAvatar, avatarUrl: myAvatarUrl || null, realName: realName || null },
         items: orderItems,
-        total: orderTotal,
+
+        // 相容舊欄位：total = 未折扣小計
+        total: breakdown.subtotal,
+
+        // 新欄位（折扣與折後總額）
+        subtotal: breakdown.subtotal,
+        discount: breakdown.discount,
+        totalAfterDiscount: breakdown.totalAfterDiscount,
+        discountMeta: makeDiscountMeta(DISCOUNT),
+
         status: "submitted",
         paid: false,
         paidAt: null,
@@ -251,10 +259,8 @@ export default function CartModal({ onClose }) {
       };
       await set(orderRef, payload);
 
-      // 公告（可選）
       try { await announce(`${ roleName || "有人"}送出了一筆訂單`); } catch {}
 
-      // 清空購物袋
       if (auth.currentUser) {
         await set(ref(db, `carts/${auth.currentUser.uid}`), { items: {}, updatedAt: Date.now() });
       }
@@ -269,12 +275,12 @@ export default function CartModal({ onClose }) {
     }
   };
 
-  // 登入成功 → 自動送單（原樣保留）
+  // 登入成功 → 自動送單（保留）
   useEffect(() => {
     const onOk = (e) => { if (e?.detail?.next === "checkout") handleCheckout(); };
     window.addEventListener("login-success", onOk);
     return () => window.removeEventListener("login-success", onOk);
-  }, [enriched, total, uid, roleName, avatar, placing, isAnonymous]);
+  }, [enriched, subtotal, uid, roleName, avatar, placing, isAnonymous]);
 
   return (
     <div onClick={onClose}
@@ -337,12 +343,20 @@ export default function CartModal({ onClose }) {
           </table>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "space-between", padding: "0 16px 16px" }}>
+        {/* 底部金額：小計 + 折扣 + 折後總額（使用 pricing.js 結果） */}
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "0 16px 6px" }}>
           <div style={{ color: "#666" }}>共 {enriched.length} 項</div>
-          <div style={{ fontWeight: 900, fontSize: 18 }}>合計 NT$ {fmt1(total)}</div>
+          <div style={{ fontWeight: 900, fontSize: 18 }}>合計 NT$ {fmt1(subtotal)}</div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 16px 0" }}>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 12, color: "#64748b" }}>{DISCOUNT_LABEL}</div>
+            <div style={{ marginTop: 2, color: "#16a34a", fontWeight: 800 }}>活動折扣　- {ntd1(discountAmt)}</div>
+            <div style={{ marginTop: 2, color: "#111", fontWeight: 900 }}>折扣後總額　{ntd1(totalAfterDiscount)}</div>
+          </div>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "0 16px 16px" }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "8px 16px 16px" }}>
           <button onClick={onClose} style={{ padding: "10px 16px", borderRadius: 12 }}>關閉</button>
           <button
             onClick={handleCheckout}
