@@ -1,21 +1,27 @@
-import React, { useMemo, useState } from "react";
+// src/components/HUD.jsx
+import React, { useState, useMemo } from "react";
 import { usePlayer } from "../store/playerContext.jsx";
 import { useCart } from "../store/useCart.js";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase.js";
+
 import ProfileEditor from "./ProfileEditor.jsx";
 import OrderHistoryModal from "./OrderHistoryModal.jsx";
-import ImageButton from "./ui/ImageButton.jsx";
 import AdminPanel from "./AdminPanel.jsx";
 import AvatarUploadInline from "./AvatarUploadInline.jsx";
 import RealNameEditor from "./hud/RealNameEditor.jsx";
 import EmailBinder from "./hud/EmailBinder.jsx";
 import Last5Editor from "./hud/Last5Editor.jsx";
-
-// ✅ 新增：導入寵物視窗
 import PetWindow from "../features/pet/PetWindow.jsx";
 
-const AVATAR_EMOJI = { bunny: "🐰", bear: "🐻", cat: "🐱", duck: "🦆" };
+import TownHeader from "./TownHeader.jsx";
+
+// 依照 pet 狀態取得寵物頭像（之後可擴充）
+function getPetAvatarSprite(pet) {
+  if (!pet) return "";
+  const color = pet.color || "pink"; // 預設粉色
+  return `/pets/pet-${color}.png`;   // 圖放 public/pets/pet-pink.png 等
+}
 
 export default function HUD({ onOpenCart }) {
   let player = null;
@@ -24,11 +30,15 @@ export default function HUD({ onOpenCart }) {
   } catch (_) {}
 
   const { items } = useCart();
+
+  // Modal 狀態
   const [editOpen, setEditOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
-  const [petOpen, setPetOpen] = useState(false); // ✅ 新增：寵物視窗開關
+  const [petOpen, setPetOpen] = useState(false);
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
 
+  // 購物車數量
   const cartQty = useMemo(
     () =>
       Array.isArray(items)
@@ -39,229 +49,160 @@ export default function HUD({ onOpenCart }) {
 
   const isAnonymous = !!player?.user?.isAnonymous || !player?.user?.uid;
   const isAdmin = !!player?.isAdmin;
-  const roleName = player?.roleName || (isAnonymous ? "旅人" : "玩家");
-  const avatar = player?.avatar || "bunny";
+
+  // 玩家名稱：未登入時會是「旅人」
+  const baseRoleName = "旅人";
+  const displayName =
+    (!isAnonymous &&
+      (player?.profile?.displayName ||
+        player?.profile?.realName ||
+        player?.roleName)) ||
+    baseRoleName;
+
+  // 金幣
   const coins = Number(player?.coins || 0);
 
-  const avatarNode = useMemo(() => {
-    const av = player?.profile?.avatar || avatar;
+  // 玩家頭像（custom 且有 url 才顯示圖片）
+  const playerAvatarSrc = (() => {
+    const av = player?.profile?.avatar || player?.avatar || "bunny";
     const url = player?.profile?.avatarUrl || "";
-    if (av === "custom" && url) {
-      return (
-        <img
-          src={url}
-          alt="me"
-          style={{
-            width: 28,
-            height: 28,
-            borderRadius: "50%",
-            objectFit: "cover",
-            border: "1px solid #e5e7eb",
-          }}
-        />
-      );
+    if (av === "custom" && url) return url;
+    return "";
+  })();
+
+  // 寵物資料
+ const pet = player?.pet;
+const petAvatarSrc = getPetAvatarSprite(pet);
+const petLevel = Number(pet?.level || 1);
+const petExp = Number(pet?.expPct || 0);
+
+// 🐾 優先顯示玩家幫寵物取的名字，沒有再 fallback 成「便便寶」
+const petName =
+  pet?.displayName ||    // 例如：玩家在寵物系統自訂的名字
+  pet?.nickname ||       // 或你後端用 nickname 命名
+  pet?.name ||           // 或一般 name 欄位
+  "便便寶";              // 都沒有才退回便便寶（種類）
+
+  // 登出
+  async function handleLogout() {
+    if (player?.logoutAndGoAnonymous) {
+      await player.logoutAndGoAnonymous();
+    } else {
+      await signOut(auth);
     }
-    return <span style={{ fontSize: 28 }}>{AVATAR_EMOJI[av] || "🙂"}</span>;
-  }, [player?.profile?.avatar, player?.profile?.avatarUrl, avatar]);
+    setSettingsMenuOpen(false);
+  }
+
+  const openLogin = () => {
+    player?.openLoginGate?.();
+  };
 
   return (
     <>
-      {/* 右下角 HUD */}
+      {/* 左上角 HUD 容器 */}
       <div
         style={{
           position: "fixed",
-          right: "max(12px, env(safe-area-inset-right))",
-          bottom: "max(12px, env(safe-area-inset-bottom))",
+          left: "max(8px, env(safe-area-inset-left))",
+          top: "max(8px, env(safe-area-inset-top))",
           zIndex: 1000,
-          display: "grid",
-          gap: 4,
-          minWidth: 200,
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
         }}
       >
-        {/* 玩家卡片 */}
+        {/* 上方木板 Header */}
+        <TownHeader
+          playerName={player?.roleName || "旅人"}
+          playerAvatarSrc={playerAvatarSrc}
+          petAvatarSrc={petAvatarSrc}
+          petName={petName}
+          petLevel={petLevel}
+          petExp={petExp}
+          cartCount={cartQty}
+          isAnonymous={isAnonymous}
+          onClickLogin={openLogin}
+          onOpenSettings={() => {
+            if (isAnonymous) {
+              openLogin();
+            } else {
+              setSettingsMenuOpen((s) => !s);
+            }
+          }}
+          onOpenCart={onOpenCart}
+          onOpenOrders={() => {
+            if (!isAnonymous) setHistoryOpen(true);
+            else openLogin();
+          }}
+          onOpenBag={() => {}}
+          onOpenPet={() => {
+            if (!isAnonymous) setPetOpen(true);
+            else openLogin();
+          }}
+          showAdmin={isAdmin && !isAnonymous}
+          onOpenAdmin={() => setAdminOpen(true)}
+        />
+
+        {/* 金幣顯示（依你需求可保留/之後再移位） */}
         <div
           style={{
             display: "flex",
+            gap: 6,
             alignItems: "center",
-            gap: 10,
-            padding: 10,
-            border: "1px solid #eee",
-            borderRadius: 14,
-            background: "rgba(255,255,255,.98)",
-            boxShadow: "0 10px 24px rgba(0,0,0,.12)",
+            flexWrap: "wrap",
           }}
         >
-          {avatarNode}
-          <div style={{ minWidth: 0 }}>
-            <div
-              style={{
-                fontWeight: 900,
-                lineHeight: 1.1,
-                whiteSpace: "nowrap",
-                textOverflow: "ellipsis",
-                overflow: "hidden",
-              }}
-            >
-              {roleName}
-            </div>
-            <div style={{ fontSize: 12, color: "#475569" }}>金幣：{coins}</div>
-          </div>
-
-          {!isAnonymous && (
-            <button
-              onClick={() => setEditOpen(true)}
-              style={{
-                marginLeft: "auto",
-                padding: "6px 10px",
-                borderRadius: 10,
-                border: "1px solid #ddd",
-                background: "#fff",
-                fontWeight: 800,
-                cursor: "pointer",
-              }}
-              title="編輯角色"
-            >
-              編輯
-            </button>
-          )}
-        </div>
-
-        {/* 操作列 */}
-        <div
-          style={{
-            display: "flex",
-            gap: 2,
-            padding: 8,
-            border: "1px solid #eee",
-            borderRadius: 14,
-            background: "rgba(255,255,255,.98)",
-            boxShadow: "0 10px 24px rgba(0,0,0,.12)",
-            alignItems: "center",
-            justifyContent: "flex-end",
-          }}
-        >
-          {/* 購物袋 */}
-          <ImageButton
-            img="/buildings/button-normal.png"
-            imgHover="/buildings/button-light.png"
-            imgActive="/buildings/button-dark.png"
-            label="購物袋"
-            labelPos="center"
-            labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
-            badge={cartQty}
-            width={104}
-            height={48}
-            onClick={onOpenCart}
-            title="開啟購物袋"
-          />
-
-          {/* 訂購紀錄 */}
-          {!isAnonymous && (
-            <ImageButton
-              img="/buildings/button-normal.png"
-              imgHover="/buildings/button-light.png"
-              imgActive="/buildings/button-dark.png"
-              label="訂購紀錄"
-              labelPos="center"
-              labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
-              width={104}
-              height={48}
-              onClick={() => setHistoryOpen(true)}
-              title="查看我的訂購紀錄"
-            />
-          )}
-
-          {/* ✅ 寵物按鈕 */}
-          {!isAnonymous && (
-            <ImageButton
-              img="/buildings/button-normal.png"
-              imgHover="/buildings/button-light.png"
-              imgActive="/buildings/button-dark.png"
-              label="寵物"
-              labelPos="center"
-              labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
-              width={104}
-              height={48}
-              onClick={() => setPetOpen(true)}
-              title="開啟寵物視窗"
-            />
-          )}
-
-          {/* 管理商品（admin） */}
-          {isAdmin && !isAnonymous && (
-            <ImageButton
-              img={`/buildings/button-normal.png`}
-              imgHover={`/buildings/button-light.png`}
-              imgActive={`/buildings/button-dark.png`}
-              label="管理商品"
-              labelPos="center"
-              labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
-              width={104}
-              height={48}
-              onClick={() => setAdminOpen(true)}
-              title="管理商品"
-            />
-          )}
-
-          {/* 登入 / 登出 */}
-          {isAnonymous ? (
-            <>
-              <ImageButton
-                img="/buildings/button-normal.png"
-                imgHover="/buildings/button-light.png"
-                imgActive="/buildings/button-dark.png"
-                label="登入"
-                labelPos="center"
-                labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
-                width={104}
-                height={48}
-                onClick={() => player?.openLoginGate?.()}
-                title="登入或建立帳號（升級匿名帳號，購物袋保留）"
-              />
-              <ImageButton
-                img="/buildings/button-normal.png"
-                imgHover="/buildings/button-light.png"
-                imgActive="/buildings/button-dark.png"
-                label="建立帳號"
-                labelPos="center"
-                labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
-                width={104}
-                height={48}
-                onClick={async () => {
-                  if (player?.logoutAndGoAnonymous) {
-                    await player.logoutAndGoAnonymous();
-                  } else {
-                    await signOut(auth);
-                  }
-                  player?.openLoginGate?.();
-                }}
-                title="以另一個帳號登入"
-              />
-            </>
-          ) : (
-            <ImageButton
-              img="/buildings/button-normal.png"
-              imgHover="/buildings/button-light.png"
-              imgActive="/buildings/button-dark.png"
-              label="登出"
-              labelPos="center"
-              labelStyle={{ fontSize: "clamp(12px, 1.6vw, 18px)" }}
-              width={104}
-              height={48}
-              onClick={async () => {
-                if (player?.logoutAndGoAnonymous) {
-                  await player.logoutAndGoAnonymous();
-                } else {
-                  await signOut(auth);
-                }
-              }}
-              title="登出並回到匿名模式"
-            />
-          )}
+          <span
+            style={{
+              fontSize: 12,
+              background: "rgba(255,255,255,0.9)",
+              borderRadius: 999,
+              padding: "3px 8px",
+              border: "1px solid rgba(0,0,0,0.06)",
+            }}
+          >
+            金幣：{coins}
+          </span>
         </div>
       </div>
 
-      {/* 編輯角色 */}
+      {/* 設定下拉選單（登入後點設定才會出現） */}
+      {!isAnonymous && settingsMenuOpen && (
+        <div
+          style={{
+            position: "fixed",
+            left: "max(8px, env(safe-area-inset-left))",
+            top: "calc(max(8px, env(safe-area-inset-top)) + 96px)",
+            zIndex: 1100,
+            background: "rgba(255,255,255,0.97)",
+            borderRadius: 12,
+            boxShadow: "0 8px 20px rgba(0,0,0,0.18)",
+            padding: 8,
+            minWidth: 140,
+          }}
+        >
+          <button
+            type="button"
+            style={settingsItemStyle}
+            onClick={() => {
+              setEditOpen(true);
+              setSettingsMenuOpen(false);
+            }}
+          >
+            個人資料
+          </button>
+          <button
+            type="button"
+            style={settingsItemStyle}
+            onClick={handleLogout}
+          >
+            登出
+          </button>
+        </div>
+      )}
+
+      {/* === 以下：原本 HUD 的各種 modal 功能 === */}
+
       <ProfileEditor
         open={editOpen && !isAnonymous}
         onClose={() => setEditOpen(false)}
@@ -271,20 +212,17 @@ export default function HUD({ onOpenCart }) {
         extraEmailBinder={<EmailBinder />}
       />
 
-      {/* 訂購紀錄 */}
       <OrderHistoryModal
         open={!isAnonymous && historyOpen}
         onClose={() => setHistoryOpen(false)}
       />
 
-      {/* ✅ 寵物視窗 */}
       <PetWindow
         open={!isAnonymous && petOpen}
         onClose={() => setPetOpen(false)}
         meUid={player?.user?.uid}
       />
 
-      {/* 管理商品全畫面 Modal */}
       {adminOpen && (
         <div
           style={{
@@ -302,20 +240,7 @@ export default function HUD({ onOpenCart }) {
           </div>
           <button
             onClick={() => setAdminOpen(false)}
-            title="關閉"
-            style={{
-              position: "fixed",
-              right: 18,
-              top: 18,
-              zIndex: 2001,
-              padding: "8px 12px",
-              borderRadius: 10,
-              border: "1px solid #ddd",
-              background: "#fff",
-              fontWeight: 800,
-              cursor: "pointer",
-              boxShadow: "0 10px 24px rgba(0,0,0,.16)",
-            }}
+            style={closeBtnStyle}
           >
             關閉
           </button>
@@ -324,3 +249,29 @@ export default function HUD({ onOpenCart }) {
     </>
   );
 }
+
+const settingsItemStyle = {
+  display: "block",
+  width: "100%",
+  textAlign: "left",
+  padding: "6px 10px",
+  borderRadius: 8,
+  border: "none",
+  background: "transparent",
+  fontSize: 13,
+  cursor: "pointer",
+};
+
+const closeBtnStyle = {
+  position: "fixed",
+  right: 18,
+  top: 18,
+  zIndex: 2001,
+  padding: "8px 12px",
+  borderRadius: 10,
+  border: "1px solid #ddd",
+  background: "#fff",
+  fontWeight: 800,
+  cursor: "pointer",
+  boxShadow: "0 10px 24px rgba(0,0,0,.16)",
+};

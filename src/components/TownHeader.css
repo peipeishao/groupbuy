@@ -1,0 +1,298 @@
+/* ------------------------------------------------------
+   整個 Header 區塊（控制位置 & 寬度）
+------------------------------------------------------- */
+.th-root {
+  position: absolute;
+  top: 0;
+  left: 0;
+  margin: 8px;
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: auto;
+}
+
+/* ------------------------------------------------------
+   玩家資訊木牌區（你的 HEADBOARD.png 當背景）
+------------------------------------------------------- */
+.th-playerPanel {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 26px 18px;
+  border-radius: 10px;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  min-width: 200px;
+}
+
+/* ------------------------------------------------------
+   左側雙圓頭像
+------------------------------------------------------- */
+.th-avatarStack {
+  position: relative;
+  width: 80px;
+  height: 60px;
+  flex-shrink: 0;
+}
+
+.th-avatarCircle {
+  position: absolute;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  overflow: hidden;
+}
+
+.th-avatarImgInner {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 999px;
+  display: block;
+}
+
+.th-avatarCircle--big {
+  width: 52px;
+  height: 52px;
+  left: 0;
+  top: 0;
+}
+
+/* 小圓：寵物頭像 */
+.th-avatarCircle--small {
+  width: 32px;
+  height: 32px;
+  left: 34px;
+  top: 26px;
+}
+
+/* 小圓變成可點擊按鈕 */
+.th-avatarCircleBtn {
+  border: none;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transition: transform 0.12s ease-out;
+}
+
+.th-avatarCircleBtn:hover {
+  transform: translateY(-1px) scale(1.02);
+}
+
+.th-avatarCircleBtn:active {
+  transform: scale(0.96);
+}
+
+/* ------------------------------------------------------
+   文字區：名字、登入小字、寵物名
+------------------------------------------------------- */
+.th-playerText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 玩家名稱 + 登入小字 */
+.th-playerNameRow {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.th-playerName {
+  font-size: 16px;
+  font-weight: 700;
+  color: #4c3a28;
+}
+
+/* 登入連結（未登入才出現） */
+.th-loginLink {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font-size: 12px;
+  color: #3366cc;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.th-loginLink:hover {
+  color: #224488;
+}
+
+.th-petName {
+  font-size: 14px;
+  color: #5a4634;
+}
+
+/* ------------------------------------------------------
+   等級 + 經驗值條
+------------------------------------------------------- */
+.th-expRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.th-levelBadge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #f3c14a;
+  color: #4c3a28;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.th-expBar {
+  width: 130px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  overflow: hidden;
+}
+
+.th-expFill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ffdba5, #ffffff);
+  transition: width 0.25s ease-out;
+}
+
+/* ------------------------------------------------------
+   下方 icon 按鈕列
+------------------------------------------------------- */
+.th-toolbarRow {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* 用你的 PNG 當 icon 按鈕 */
+.th-iconBtnPlain {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  transition: transform 0.1s ease-out;
+}
+
+.th-iconBtnPlain:hover {
+  transform: translateY(-1px) scale(1.03);
+}
+
+.th-iconBtnPlain:active {
+  transform: scale(0.95);
+}
+
+/* icon & badge */
+.th-iconWrapper {
+  position: relative;
+}
+
+.th-iconImg {
+  width: 60px;
+  height: 60px;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.th-badgeDot {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 14px;
+  padding: 1px 4px;
+  border-radius: 999px;
+  background: #df5a5a;
+  color: #ffffff;
+  font-size: 10px;
+  text-align: center;
+}
+
+.th-iconLabel {
+  display: none;
+}
+
+/* ------------------------------------------------------
+   Admin 專用：商品管理按鈕
+------------------------------------------------------- */
+.th-adminIconBtn {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.th-adminIconCircle {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  font-size: 14px;
+  font-weight: 700;
+  color: #4c3a28;
+}
+
+/* ------------------------------------------------------
+   手機版
+------------------------------------------------------- */
+@media (max-width: 768px) {
+  .th-root {
+    margin: 6px 8px;
+  }
+
+  .th-playerPanel {
+    transform: scale(0.9);
+    transform-origin: top left;
+  }
+}
+/* 寵物按鈕明顯提示：光暈 */
+.th-avatarCircleBtn {
+  border: none;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transition: transform 0.12s ease-out, box-shadow 0.2s ease-out;
+  box-shadow: 0 0 0px 0 rgba(255, 200, 80, 0.0);
+  animation: thPetPulse 2.4s ease-in-out infinite;
+}
+
+@keyframes thPetPulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0px 0 rgba(255, 200, 80, 0.0);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 0 10px 4px rgba(255, 200, 80, 0.45);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0px 0 rgba(255, 200, 80, 0.0);
+  }
+}

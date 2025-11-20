@@ -14,6 +14,7 @@ import { auth, db } from "../firebase.js";
 import { onAuthStateChanged, signInAnonymously } from "firebase/auth";
 import StallStatusSign from "../components/StallStatusSign.jsx";
 import PetFollowers from "../features/pet/PetFollowers.jsx";
+import TownHeader from "../components/TownHeader.jsx";
 
 //
 // 🐾 寵物系統（新版撿取 API）
@@ -132,7 +133,7 @@ export default function MarketTown() {
     return () => off();
   }, [auth.currentUser?.uid]);
 
-  const BG_URL = "/bg-town.jpg";
+  const BG_URL = "/bg-town-2.png";
 
   // 攤位按鈕
   const placards = [
@@ -221,8 +222,16 @@ export default function MarketTown() {
   }
 
   return (
-    <div style={{ minHeight: "100vh" }}>
+    <div style={{ minHeight: "100vh", position: "relative" }}>
+
+     
+
+      {/* 🚨 重要：推動畫面避免 TownHeader 被蓋住 or 擠到外面 */}
+      <div style={{ height: "100px" }}></div>
+
       {/* 背景與釘點（兩塊開團時間牌 + 兩顆入口按鈕） */}
+      {/* ↓↓↓ 下面開始完全保留你的原始程式碼 ↓↓↓ */}
+
       <FullBleedStage bg={BG_URL} baseWidth={1920} baseHeight={1080}>
         <Pin xPct={47} yPct={24} widthRel={0.10}>
           <div style={{ position: "relative", zIndex: 20, width: "100%" }}>
@@ -237,6 +246,7 @@ export default function MarketTown() {
             />
           </div>
         </Pin>
+
         <Pin xPct={65} yPct={24} widthRel={0.10}>
           <div style={{ position: "relative", zIndex: 20, width: "100%" }}>
             <StallStatusSign
@@ -251,7 +261,6 @@ export default function MarketTown() {
           </div>
         </Pin>
 
-        {/* 入口按鈕 */}
         {placards.map((p) => (
           <Pin key={p.id} xPct={p.xPct} yPct={p.yPct} widthRel={p.widthRel}>
             <PlacardImageButton
@@ -264,7 +273,6 @@ export default function MarketTown() {
           </Pin>
         ))}
 
-        {/* 地圖層：大家播的臨時便便（用 emoji 當圖示） */}
         {communityPoops.map((p) => (
           <div key={`${p.uid}:${p.id}`} style={{ position: "absolute", left: p.x, top: p.y }}>
             <div style={styles.poopIcon}>💩</div>
@@ -272,15 +280,12 @@ export default function MarketTown() {
         ))}
       </FullBleedStage>
 
-      {/* ✅ 寵物跟隨層（顯示誰有寵物就跟著誰） */}
       <PetFollowers />
 
-      {/* 小鎮層（原樣） */}
       <div style={{ position: "relative", zIndex: 3 }}>
         <Town />
       </div>
 
-      {/* 主面板（訂單總覽） */}
       <div style={styles.panelArea}>
         <div style={styles.card}>
           <div style={styles.hScroll}>
@@ -289,27 +294,22 @@ export default function MarketTown() {
         </div>
       </div>
 
-      {/* 聊天框 */}
       <div style={styles.chatCorner}>
         <ChatBox />
       </div>
 
-      {/* 右下角 HUD */}
       <HUD onOpenCart={() => setCartOpen(true)} />
 
-      {/* 便便按鈕（右下） */}
       <button style={styles.plantBtn} onClick={handlePlantNearMe} title="播一顆臨時便便（10分鐘）">
         便便 💩
       </button>
 
-      {/* 彈幕/公告 */}
       <div style={styles.toastStack}>
         <div style={styles.toastItem}>
           <AnnouncementDanmaku lanes={4} rowHeight={38} topOffset={0} durationSec={9} />
         </div>
       </div>
 
-      {/* 攤位選單 / 購物袋 / 管理商品 */}
       {openSheet && (
         <OrderSheetModal
           open={!!openSheet}
@@ -317,6 +317,7 @@ export default function MarketTown() {
           onClose={() => setOpenSheet(null)}
         />
       )}
+
       {cartOpen && <CartModal onClose={() => setCartOpen(false)} />}
       {pmOpen && <ProductManager onClose={() => setPmOpen(false)} />}
 
