@@ -11,7 +11,7 @@
 export const DISCOUNT = {
   active: true,
   mode: "perItem",          // ← 新增欄位：保留擴充性（未來可支援滿額折等）
-  perItem: 3,               // 每件折 3 元
+  perItem: 0,               // 每件折 3 元
   label: "折扣活動：每件折 $3",
 };
 
