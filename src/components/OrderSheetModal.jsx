@@ -1,8 +1,5 @@
-// src/components/OrderSheetModal.jsx — 不再使用 reservation，上限交給結帳檢查
-// 修正點：
-// 1) 移除 setReservation / reservations 邏輯
-// 2) addSelectedToCart 只寫入 carts，不動 stock/*
-// 3) 與 CartModal 的「方案 B：只看 soldCount」保持一致
+// src/components/OrderSheetModal.jsx — 顯示剩餘可訂購（只看 soldCount）
+// 不使用 reservation，上限檢查交給 CartModal 的 checkout
 
 import React, { useEffect, useMemo, useState } from "react";
 import { db, auth } from "../firebase.js";
@@ -10,8 +7,6 @@ import { ref, set, onValue } from "firebase/database";
 import { usePlayer } from "../store/playerContext.jsx";
 import { useCart } from "../store/useCart.js";
 import ReviewModal from "./reviews/ReviewModal.jsx";
-
-// 價格工具
 import { DISCOUNT, calcPriceBreakdown, ntd1 } from "../utils/pricing.js";
 
 const fmt = (n) => new Intl.NumberFormat("zh-TW").format(n || 0);
@@ -24,7 +19,8 @@ const fmt1 = (n) =>
 /** ===== 攤位 campaign 倒數 ===== */
 function useStallCampaign(stallId) {
   const [camp, setCamp] = useState(null);
-  const [tick, setTick] = useState(0);
+  const [, setTick] = useState(0);
+
   useEffect(() => {
     if (!stallId) return;
     const off = onValue(ref(db, `stalls/${stallId}/campaign`), (snap) =>
@@ -39,13 +35,14 @@ function useStallCampaign(stallId) {
       clearInterval(t);
     };
   }, [stallId]);
+
   const now = Date.now();
   const startAt = camp?.startAt ? Number(camp.startAt) : null;
   const closeAt = camp?.closeAt ? Number(camp.closeAt) : null;
   const statusRaw = String(camp?.status || "ongoing");
   const upcoming = startAt && now < startAt;
-  const ended =
-    (closeAt && now >= closeAt) || statusRaw === "ended";
+  const ended = (closeAt && now >= closeAt) || statusRaw === "ended";
+
   const cdText = (() => {
     if (!closeAt) return "-";
     if (ended) return "已截止";
@@ -54,11 +51,10 @@ function useStallCampaign(stallId) {
     const m = Math.floor((s % 3600) / 60);
     const sec = s % 60;
     return h > 0
-      ? `${h}:${String(m).padStart(2, "0")}:${String(
-          sec
-        ).padStart(2, "0")}`
+      ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
       : `${m}:${String(sec).padStart(2, "0")}`;
   })();
+
   return { upcoming, ended, cdText };
 }
 
@@ -101,36 +97,36 @@ function useReviewStats(itemId) {
   const [stats, setStats] = useState({ count: 0, avg: 0 });
   useEffect(() => {
     if (!itemId) return;
-    const off = onValue(
-      ref(db, `reviews/${itemId}`),
-      (snap) => {
-        const v = snap.val() || {};
-        const arr = Object.values(v);
-        const count = arr.length;
-        const avg = count
-          ? arr.reduce(
-              (s, r) => s + (Number(r.stars) || 0),
-              0
-            ) / count
-          : 0;
-        setStats({ count, avg });
-      }
-    );
+    const off = onValue(ref(db, `reviews/${itemId}`), (snap) => {
+      const v = snap.val() || {};
+      const arr = Object.values(v);
+      const count = arr.length;
+      const avg = count
+        ? arr.reduce((s, r) => s + (Number(r.stars) || 0), 0) / count
+        : 0;
+      setStats({ count, avg });
+    });
     return () => off();
   }, [itemId]);
   return stats;
 }
 
-/** 商品卡（外觀保留；下方僅控制數量） */
+/** 商品卡 */
 function ProductCard({
   p,
   q,
+  remaining,
   onDec,
   onInc,
   onInput,
   onOpenReview,
 }) {
   const stats = useReviewStats(p.id);
+  const remainingText =
+    remaining != null
+      ? `剩餘可訂購：${remaining}${p.unit || "份"}`
+      : null;
+
   return (
     <div
       className="card"
@@ -182,36 +178,37 @@ function ProductCard({
 
       <div style={{ margin: "6px 0" }}>
         價格：🪙 {fmt1(p.price)}
-        {typeof p.original === "number" &&
-          p.original > p.price && (
-            <span
-              style={{
-                marginLeft: 6,
-                color: "#64748b",
-                textDecoration: "line-through",
-              }}
-            >
-              {fmt(p.original)}
-            </span>
-          )}
-        {p.unit && (
+        {typeof p.original === "number" && p.original > p.price && (
           <span
-            style={{ marginLeft: 6, color: "#64748b" }}
+            style={{
+              marginLeft: 6,
+              color: "#64748b",
+              textDecoration: "line-through",
+            }}
           >
-            ／{p.unit}
+            {fmt(p.original)}
           </span>
+        )}
+        {p.unit && (
+          <span style={{ marginLeft: 6, color: "#64748b" }}>／{p.unit}</span>
         )}
       </div>
 
-      <div
-        style={{
-          color: "#64748b",
-          fontSize: 12,
-          marginBottom: 4,
-        }}
-      >
+      <div style={{ color: "#64748b", fontSize: 12, marginBottom: 2 }}>
         最低下單 {p.minQty}
       </div>
+
+      {remainingText && (
+        <div
+          style={{
+            color: remaining > 0 ? "#16a34a" : "#ef4444",
+            fontSize: 11,
+            marginBottom: 4,
+          }}
+        >
+          {remainingText}
+        </div>
+      )}
 
       <div
         style={{
@@ -221,11 +218,7 @@ function ProductCard({
           marginTop: 4,
         }}
       >
-        <button
-          type="button"
-          onClick={onDec}
-          className="small-btn"
-        >
+        <button type="button" onClick={onDec} className="small-btn">
           −
         </button>
         <input
@@ -243,11 +236,7 @@ function ProductCard({
             padding: "6px 4px",
           }}
         />
-        <button
-          type="button"
-          onClick={onInc}
-          className="small-btn"
-        >
+        <button type="button" onClick={onInc} className="small-btn">
           ＋
         </button>
       </div>
@@ -262,42 +251,38 @@ function ProductCard({
         <button onClick={onOpenReview} style={linkBtn}>
           查看 / 撰寫評論
         </button>
-        <div
-          title={`平均 ${stats.avg.toFixed(
-            1
-          )}★ / 共 ${stats.count} 則`}
-          style={badgeStyle}
-        >
+        <div title={`平均 ${stats.avg.toFixed(1)}★`} style={badgeStyle}>
           <span style={{ fontWeight: 900 }}>
             ★ {stats.avg.toFixed(1)}
           </span>
-          <span style={{ opacity: 0.8 }}>
-            （{stats.count}）
-          </span>
+          <span style={{ opacity: 0.8 }}>（{stats.count}）</span>
         </div>
       </div>
     </div>
   );
 }
 
-export default function OrderSheetModal({
-  open,
-  stallId,
-  onClose,
-}) {
+export default function OrderSheetModal({ open, stallId, onClose }) {
   const { openLoginGate } = usePlayer();
   const { items: cartAll = [], reload } = useCart();
-
-  // ✅ 僅在元件本體呼叫一次 hook
-  const { upcoming, ended, cdText } =
-    useStallCampaign(stallId);
+  const { upcoming, ended, cdText } = useStallCampaign(stallId);
 
   const [available, setAvailable] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sourceLabel, setSourceLabel] = useState("");
 
-  // 本攤位購物袋（原樣保留）
+  // 本攤位購物袋
   const [stallCart, setStallCart] = useState([]);
+
+  // 讀取 /stock（只看 soldCount）
+  const [stock, setStock] = useState({});
+  useEffect(() => {
+    const off = onValue(ref(db, "stock"), (snap) => {
+      setStock(snap.val() || {});
+    });
+    return () => off();
+  }, []);
+
   useEffect(() => {
     if (!open || !stallId) {
       setStallCart([]);
@@ -305,10 +290,7 @@ export default function OrderSheetModal({
     }
     if (!auth.currentUser) {
       setStallCart(
-        cartAll.filter(
-          (it) =>
-            String(it.stallId) === String(stallId)
-        )
+        cartAll.filter((it) => String(it.stallId) === String(stallId))
       );
       return;
     }
@@ -318,17 +300,13 @@ export default function OrderSheetModal({
       (snap) => {
         const v = snap.val() || {};
         const arr = Object.values(v).filter(
-          (it) =>
-            String(it.stallId) === String(stallId)
+          (it) => String(it.stallId) === String(stallId)
         );
         setStallCart(arr);
       },
       () => {
         setStallCart(
-          cartAll.filter(
-            (it) =>
-              String(it.stallId) === String(stallId)
-          )
+          cartAll.filter((it) => String(it.stallId) === String(stallId))
         );
       }
     );
@@ -342,43 +320,31 @@ export default function OrderSheetModal({
   const total = useMemo(
     () =>
       stallCart.reduce(
-        (s, x) =>
-          s + (Number(x.price) || 0) * (Number(x.qty) || 0),
+        (s, x) => s + (Number(x.price) || 0) * (Number(x.qty) || 0),
         0
       ),
     [stallCart]
   );
 
-  // 折扣（UI 顯示；實際寫入在送單流程）
   const {
     discount: discountAmt,
     total: totalAfterDiscount,
-  } = useMemo(
-    () => calcPriceBreakdown(stallCart),
-    [stallCart]
-  );
+  } = useMemo(() => calcPriceBreakdown(stallCart), [stallCart]);
   const DISCOUNT_LABEL = DISCOUNT.label;
 
   // 上半部：每個商品的「待加入數量」
   const [sel, setSel] = useState({});
   const selTotalQty = useMemo(
-    () =>
-      Object.values(sel).reduce(
-        (s, n) => s + (Number(n) || 0),
-        0
-      ),
+    () => Object.values(sel).reduce((s, n) => s + (Number(n) || 0), 0),
     [sel]
   );
   const setQty = (id, v) =>
-    setSel((m) => ({
-      ...m,
-      [id]: Math.max(0, Number(v) || 0),
-    }));
+    setSel((m) => ({ ...m, [id]: Math.max(0, Number(v) || 0) }));
 
   // 評論視窗控制
   const [reviewItem, setReviewItem] = useState(null);
 
-  // 讀取可選商品（fallback：stalls/{stallId}/items → products/{stallId} → products）
+  // 讀取可選商品
   useEffect(() => {
     if (!open) return;
     let off1 = null,
@@ -396,69 +362,49 @@ export default function OrderSheetModal({
         (snap) => {
           const v = snap.val();
           if (v && typeof v === "object") {
-            const list = Object.entries(v).map(
-              ([id, p]) => {
-                const price =
-                  p?.price != null
-                    ? Number(p.price)
-                    : p?.priceGroup != null
-                    ? Number(p.priceGroup)
-                    : 0;
-                const original =
-                  p?.original != null
-                    ? Number(p.original)
-                    : p?.priceOriginal != null
-                    ? Number(p.priceOriginal)
-                    : undefined;
-                return {
-                  id,
-                  name: String(p?.name ?? ""),
-                  price,
-                  original,
-                  img: String(p?.imageUrl ?? ""),
-                  unit: String(p?.unit ?? "包"),
-                  stallId: String(p?.stallId ?? ""),
-                  category: String(p?.category ?? ""),
-                  active: p?.active !== false,
-                  createdAt: Number(
-                    p?.createdAt ?? 0
-                  ),
-                  minQty: Math.max(
-                    1,
-                    Number(p?.minQty || 1)
-                  ),
-                  stockCapacity: Number(
-                    p?.stockCapacity || 0
-                  ),
-                };
-              }
-            );
+            const list = Object.entries(v).map(([id, p]) => {
+              const price =
+                p?.price != null
+                  ? Number(p.price)
+                  : p?.priceGroup != null
+                  ? Number(p.priceGroup)
+                  : 0;
+              const original =
+                p?.original != null
+                  ? Number(p.original)
+                  : p?.priceOriginal != null
+                  ? Number(p.priceOriginal)
+                  : undefined;
+              return {
+                id,
+                name: String(p?.name ?? ""),
+                price,
+                original,
+                img: String(p?.imageUrl ?? ""),
+                unit: String(p?.unit ?? "包"),
+                stallId: String(p?.stallId ?? ""),
+                category: String(p?.category ?? ""),
+                active: p?.active !== false,
+                createdAt: Number(p?.createdAt ?? 0),
+                minQty: Math.max(1, Number(p?.minQty || 1)),
+                stockCapacity: Number(p?.stockCapacity || 0),
+              };
+            });
             const filtered = list
               .filter(
                 (it) =>
                   it.active &&
                   it.price > 0 &&
                   (!stallId ||
-                    String(
-                      it.stallId || it.category
-                    ) === String(stallId))
+                    String(it.stallId || it.category) === String(stallId))
               )
               .sort(
                 (a, b) =>
                   b.createdAt - a.createdAt ||
-                  String(a.name).localeCompare(
-                    String(b.name)
-                  )
+                  String(a.name).localeCompare(String(b.name))
               );
             setAvailable(
-              filtered.map(
-                ({
-                  active,
-                  createdAt,
-                  category,
-                  ...it
-                }) => it
-              )
+              filtered.map(({ active, createdAt, category, ...it }) => it)
             );
             setSourceLabel("products");
           } else {
@@ -505,30 +451,19 @@ export default function OrderSheetModal({
                   img: String(p?.imageUrl ?? ""),
                   unit: String(p?.unit ?? "包"),
                   active: p?.active !== false,
-                  createdAt: Number(
-                    p?.createdAt ?? 0
-                  ),
-                  minQty: Math.max(
-                    1,
-                    Number(p?.minQty || 1)
-                  ),
-                  stockCapacity: Number(
-                    p?.stockCapacity || 0
-                  ),
+                  createdAt: Number(p?.createdAt ?? 0),
+                  minQty: Math.max(1, Number(p?.minQty || 1)),
+                  stockCapacity: Number(p?.stockCapacity || 0),
                 };
               })
               .filter((it) => it.active && it.price > 0)
               .sort(
                 (a, b) =>
                   b.createdAt - a.createdAt ||
-                  String(a.name).localeCompare(
-                    String(b.name)
-                  )
+                  String(a.name).localeCompare(String(b.name))
               );
             setAvailable(
-              list.map(
-                ({ active, createdAt, ...it }) => it
-              )
+              list.map(({ active, createdAt, ...it }) => it)
             );
             setSourceLabel("products/{stallId}");
             setLoading(false);
@@ -546,18 +481,13 @@ export default function OrderSheetModal({
       (snap) => {
         const v = snap.val();
         if (v && typeof v === "object") {
-          const list = (Array.isArray(v)
-            ? v.filter(Boolean)
-            : Object.values(v)
-          )
+          const list = (Array.isArray(v) ? v.filter(Boolean) : Object.values(v))
             .map((it) => ({
               id: String(it.id ?? ""),
               name: String(it.name ?? ""),
               price: Number(it.price ?? 0),
               original:
-                it.original != null
-                  ? Number(it.original)
-                  : undefined,
+                it.original != null ? Number(it.original) : undefined,
               img: String(it.img ?? ""),
               unit: String(it.unit ?? "包"),
               minQty: 1,
@@ -585,7 +515,7 @@ export default function OrderSheetModal({
     };
   }, [open, stallId]);
 
-  /** 加入購物袋：以「本次目標量」覆寫（不累加），不再預留庫存 */
+  /** 加入購物袋：覆寫目標量，不預留庫存 */
   const addSelectedToCart = async () => {
     try {
       if (ended || upcoming) {
@@ -598,9 +528,9 @@ export default function OrderSheetModal({
       }
       const me = auth.currentUser?.uid;
       if (!me) {
-        // 先引導登入
-        if (typeof openLoginGate === "function")
+        if (typeof openLoginGate === "function") {
           openLoginGate({ mode: "upgrade" });
+        }
         return;
       }
       const now = Date.now();
@@ -609,55 +539,31 @@ export default function OrderSheetModal({
         const chosen = Number(sel[it.id]) || 0;
         if (chosen <= 0) continue;
 
-        const minQty = Math.max(
-          1,
-          Number(it.minQty || 1)
-        );
-        let targetQty = Math.max(
-          0,
-          Math.floor(chosen)
-        );
-        if (
-          targetQty > 0 &&
-          targetQty < minQty
-        )
-          targetQty = minQty;
+        const minQty = Math.max(1, Number(it.minQty || 1));
+        let targetQty = Math.max(0, Math.floor(chosen));
+        if (targetQty > 0 && targetQty < minQty) targetQty = minQty;
 
         const key = `${stallId}|${it.id}`;
 
         if (targetQty <= 0) {
-          await set(
-            ref(db, `carts/${me}/items/${key}`),
-            null
-          );
+          await set(ref(db, `carts/${me}/items/${key}`), null);
         } else {
-          await set(
-            ref(db, `carts/${me}/items/${key}`),
-            {
-              stallId,
-              id: it.id,
-              name: it.name,
-              price: Number(it.price) || 0,
-              qty: targetQty,
-            }
-          );
+          await set(ref(db, `carts/${me}/items/${key}`), {
+            stallId,
+            id: it.id,
+            name: it.name,
+            price: Number(it.price) || 0,
+            qty: targetQty,
+          });
         }
       }
 
-      await set(
-        ref(db, `carts/${me}/updatedAt`),
-        now
-      );
+      await set(ref(db, `carts/${me}/updatedAt`), now);
       setSel({});
       await reload?.();
     } catch (e) {
-      console.error(
-        "[addSelectedToCart] failed",
-        e
-      );
-      alert(
-        "加入購物袋失敗，請稍後再試"
-      );
+      console.error("[addSelectedToCart] failed", e);
+      alert("加入購物袋失敗，請稍後再試");
     }
   };
 
@@ -685,8 +591,7 @@ export default function OrderSheetModal({
           border: "1px solid #eee",
           boxShadow: "0 20px 48px rgba(0,0,0,.2)",
           display: "grid",
-          gridTemplateRows:
-            "56px 1fr auto",
+          gridTemplateRows: "56px 1fr auto",
           maxHeight: "88vh",
           overflow: "hidden",
         }}
@@ -703,8 +608,7 @@ export default function OrderSheetModal({
           }}
         >
           <h3 style={{ margin: 0 }}>
-            攤位：
-            {stallId || "全部"}　|　購物清單
+            攤位：{stallId || "全部"}　|　購物清單
           </h3>
           <CountdownBadgeInline
             upcoming={upcoming}
@@ -713,13 +617,8 @@ export default function OrderSheetModal({
           />
         </div>
 
-        {/* 單一可滾動內容 */}
-        <div
-          style={{
-            overflow: "auto",
-            minHeight: 0,
-          }}
-        >
+        {/* 可滾動內容 */}
+        <div style={{ overflow: "auto", minHeight: 0 }}>
           {/* 可選商品 */}
           <section
             style={{
@@ -743,11 +642,7 @@ export default function OrderSheetModal({
                   gap: 8,
                 }}
               >
-                <div
-                  style={{
-                    fontWeight: 800,
-                  }}
-                >
+                <div style={{ fontWeight: 800 }}>
                   可選商品
                 </div>
                 {sourceLabel && (
@@ -757,8 +652,7 @@ export default function OrderSheetModal({
                       color: "#64748b",
                     }}
                   >
-                    來源：
-                    <code>{sourceLabel}</code>
+                    來源：<code>{sourceLabel}</code>
                   </div>
                 )}
               </div>
@@ -800,37 +694,40 @@ export default function OrderSheetModal({
                 }}
               >
                 {available.map((p) => {
-                  const q =
-                    Number(sel[p.id]) || 0;
-                  const productMinQty =
-                    Math.max(
-                      1,
-                      Number(p.minQty || 1)
-                    );
-                  const curQty =
-                    Number(sel[p.id] || 0);
+                  const q = Number(sel[p.id]) || 0;
+                  const productMinQty = Math.max(
+                    1,
+                    Number(p.minQty || 1)
+                  );
+                  const curQty = Number(sel[p.id] || 0);
+
+                  // 剩餘可訂購（只看 soldCount）
+                  const stockNode = stock[p.id] || {};
+                  const sold = Number(stockNode.soldCount || 0);
+                  const capacity = Number(p.stockCapacity || 0);
+                  const remaining =
+                    capacity > 0
+                      ? Math.max(0, capacity - sold)
+                      : null;
 
                   return (
                     <ProductCard
                       key={p.id}
                       p={p}
                       q={q}
+                      remaining={remaining}
                       onDec={() =>
                         setSel((s) => ({
                           ...s,
                           [p.id]:
-                            curQty <=
-                            productMinQty
-                              ? 0
-                              : curQty - 1,
+                            curQty <= productMinQty ? 0 : curQty - 1,
                         }))
                       }
                       onInc={() =>
                         setSel((s) => ({
                           ...s,
                           [p.id]:
-                            curQty <
-                            productMinQty
+                            curQty < productMinQty
                               ? productMinQty
                               : curQty + 1,
                         }))
@@ -838,15 +735,10 @@ export default function OrderSheetModal({
                       onInput={(e) => {
                         const raw = Math.max(
                           0,
-                          Math.floor(
-                            Number(
-                              e.target.value
-                            ) || 0
-                          )
+                          Math.floor(Number(e.target.value) || 0)
                         );
                         const next =
-                          raw > 0 &&
-                          raw < productMinQty
+                          raw > 0 && raw < productMinQty
                             ? productMinQty
                             : raw;
                         setSel((s) => ({
@@ -867,7 +759,7 @@ export default function OrderSheetModal({
             )}
           </section>
 
-          {/* 已加入購物袋 */}
+          {/* 已加入購物袋（本攤位） */}
           <section style={{ padding: 16 }}>
             <table
               style={{
@@ -875,18 +767,9 @@ export default function OrderSheetModal({
                 borderCollapse: "collapse",
               }}
             >
-              <thead
-                style={{
-                  background: "#fafafa",
-                }}
-              >
+              <thead style={{ background: "#fafafa" }}>
                 <tr>
-                  <th
-                    style={{
-                      textAlign: "left",
-                      padding: 8,
-                    }}
-                  >
+                  <th style={{ textAlign: "left", padding: 8 }}>
                     品項
                   </th>
                   <th
@@ -939,9 +822,7 @@ export default function OrderSheetModal({
                       Number(it.qty || 0);
                     return (
                       <tr key={i}>
-                        <td style={{ padding: 8 }}>
-                          {it.name}
-                        </td>
+                        <td style={{ padding: 8 }}>{it.name}</td>
                         <td
                           style={{
                             padding: 8,
@@ -995,8 +876,7 @@ export default function OrderSheetModal({
                   fontWeight: 800,
                 }}
               >
-                活動折扣　-{" "}
-                {ntd1(discountAmt)}
+                活動折扣　- {ntd1(discountAmt)}
               </div>
               <div
                 style={{
@@ -1005,8 +885,7 @@ export default function OrderSheetModal({
                   fontWeight: 900,
                 }}
               >
-                折扣後總額　
-                {ntd1(totalAfterDiscount)}
+                折扣後總額　{ntd1(totalAfterDiscount)}
               </div>
             </div>
           </section>
@@ -1037,8 +916,7 @@ export default function OrderSheetModal({
               小計：<b>{fmt1(total)}</b>
             </div>
             <div>
-              折後：
-              <b>{ntd1(totalAfterDiscount)}</b>
+              折後：<b>{ntd1(totalAfterDiscount)}</b>
             </div>
             <button
               onClick={addSelectedToCart}
@@ -1053,9 +931,7 @@ export default function OrderSheetModal({
       {reviewItem && (
         <ReviewModal
           open={!!reviewItem}
-          onClose={() =>
-            setReviewItem(null)
-          }
+          onClose={() => setReviewItem(null)}
           itemId={reviewItem.id}
           itemName={reviewItem.name}
         />

@@ -1,4 +1,4 @@
-// src/components/CartModal.jsx —「全體上限」版本（只看已結帳數量，移除 reservations）
+// src/components/CartModal.jsx — 顯示剩餘可訂購（只看 soldCount）
 import React, { useEffect, useMemo, useState } from "react";
 import { db, auth } from "../firebase.js";
 import { ref, push, set, get, onValue, runTransaction } from "firebase/database";
@@ -6,7 +6,7 @@ import { usePlayer } from "../store/playerContext.jsx";
 import { useCart } from "../store/useCart.js";
 import { announce } from "../utils/announce.js";
 
-// ⬇️ 改用共用 pricing 工具
+// 折扣工具
 import { DISCOUNT, calcPriceBreakdown, makeDiscountMeta, ntd1 } from "../utils/pricing.js";
 
 const fmt1 = (n) =>
@@ -15,13 +15,17 @@ const fmt1 = (n) =>
     maximumFractionDigits: 1,
   }).format(Number(n) || 0);
 
-// 讀取所有 products，變成 map 方便查
+// 讀取 products → Map
 function useProductsMap() {
   const [map, setMap] = useState(new Map());
   useEffect(() => {
     const off = onValue(ref(db, "products"), (snap) => {
       const v = snap.val() || {};
-      setMap(new Map(Object.entries(v).map(([id, p]) => [id, { id, ...p }])));
+      setMap(
+        new Map(
+          Object.entries(v).map(([id, p]) => [id, { id, ...p }])
+        )
+      );
     });
     return () => off();
   }, []);
@@ -39,7 +43,6 @@ async function commitSoldCount(productId, addQty) {
   });
 }
 
-// ---------------- 主元件 ----------------
 export default function CartModal({ onClose }) {
   const { isAnonymous, openLoginGate, roleName, avatar, uid } = usePlayer();
   const { items = [], reload } = useCart();
@@ -49,7 +52,16 @@ export default function CartModal({ onClose }) {
   const myAvatar = avatar || "bunny";
   const myAvatarUrl = null;
 
-  // 小計（沿用原 total 的概念）
+  // 讀取 /stock（只看 soldCount）
+  const [stock, setStock] = useState({});
+  useEffect(() => {
+    const off = onValue(ref(db, "stock"), (snap) => {
+      setStock(snap.val() || {});
+    });
+    return () => off();
+  }, []);
+
+  // 小計
   const subtotal = useMemo(
     () =>
       items.reduce(
@@ -60,26 +72,30 @@ export default function CartModal({ onClose }) {
     [items]
   );
 
-  // 補充產品資訊：帶入 minQty / stockCapacity / 正確價格與名稱
+  // 補充產品資訊
   const enriched = items.map((it) => {
     const p = productsMap.get(String(it.id)) || {};
     return {
       ...it,
       minQty: Math.max(1, Number(p?.minQty || 1)),
-      stockCapacity: Number(p?.stockCapacity || 0), // 「全體上限」在這裡設定
+      stockCapacity: Number(p?.stockCapacity || 0),
       price: Number(p?.price ?? it.price ?? 0),
       name: p?.name || it.name,
+      unit: p?.unit || it.unit || "",
     };
   });
 
-  // 折扣（改用 pricing.js）
+  // 折扣
   const {
     discount: discountAmt,
     totalAfterDiscount,
     label: DISCOUNT_LABEL,
-  } = useMemo(() => calcPriceBreakdown(enriched, DISCOUNT), [enriched]);
+  } = useMemo(
+    () => calcPriceBreakdown(enriched, DISCOUNT),
+    [enriched]
+  );
 
-  // 調整數量（不再預留庫存，只寫入自己的 carts）
+  // 調整數量：只改 carts，不預留
   const changeQty = async (stallId, id, deltaOrValue) => {
     try {
       const me = auth.currentUser?.uid;
@@ -106,7 +122,7 @@ export default function CartModal({ onClose }) {
         const raw = Math.max(0, Number(deltaOrValue) || 0);
         nextQty = Math.floor(raw);
       }
-      // 若要買 >0，且低於 minQty，就補到 minQty
+
       if (nextQty > 0 && nextQty < minQ) nextQty = minQ;
 
       if (nextQty <= 0) {
@@ -120,10 +136,7 @@ export default function CartModal({ onClose }) {
           qty: nextQty,
         });
       }
-      await set(
-        ref(db, `carts/${me}/updatedAt`),
-        Date.now()
-      );
+      await set(ref(db, `carts/${me}/updatedAt`), Date.now());
       await reload?.();
     } catch (e) {
       console.error("[changeQty] failed", e);
@@ -137,11 +150,7 @@ export default function CartModal({ onClose }) {
       if (!me) return;
       const key = `${stallId}|${id}`;
       await set(ref(db, `carts/${me}/items/${key}`), null);
-      // 不再使用 reservations，因此不需要清 reservations
-      await set(
-        ref(db, `carts/${me}/updatedAt`),
-        Date.now()
-      );
+      await set(ref(db, `carts/${me}/updatedAt`), Date.now());
       await reload?.();
     } catch (e) {
       console.error("[removeItem] failed", e);
@@ -149,7 +158,7 @@ export default function CartModal({ onClose }) {
     }
   };
 
-  // 關單檢查（沿用）
+  // 關單檢查（保留）
   async function buildFilteredItemsIfNeeded(items0) {
     const uniqueStalls = Array.from(
       new Set(items0.map((i) => String(i.stallId)))
@@ -159,9 +168,7 @@ export default function CartModal({ onClose }) {
 
     for (const sid of uniqueStalls) {
       try {
-        const snap = await get(
-          ref(db, `stalls/${sid}/campaign`)
-        );
+        const snap = await get(ref(db, `stalls/${sid}/campaign`));
         const v = snap.val() || null;
         const closeAt = v?.closeAt ? Number(v.closeAt) : null;
         const status = String(v?.status || "ongoing");
@@ -185,7 +192,8 @@ export default function CartModal({ onClose }) {
     const proceed = window.confirm(
       `${stallNames} 已截止，是否只送未截止的品項？\n按「確定」會自動剔除已截止的品項。`
     );
-    if (!proceed) return { ok: false, finalItems: [] };
+    if (!proceed)
+      return { ok: false, finalItems: [] };
 
     const kept = items0.filter(
       (it) => !closedMap[String(it.stallId)]
@@ -197,7 +205,7 @@ export default function CartModal({ onClose }) {
     return { ok: true, finalItems: kept };
   }
 
-  // 送單：使用「全體上限」檢查 + pricing.js 折扣
+  // 送單（只看 soldCount + stockCapacity）
   const handleCheckout = async () => {
     if (placing || !enriched.length) return;
     if (isAnonymous) {
@@ -212,7 +220,6 @@ export default function CartModal({ onClose }) {
     try {
       setPlacing(true);
 
-      // 先過濾掉已截止攤位
       const { ok, finalItems } =
         await buildFilteredItemsIfNeeded(enriched);
       if (!ok) {
@@ -222,10 +229,7 @@ export default function CartModal({ onClose }) {
 
       // 檢查 minQty
       for (const it of finalItems) {
-        const minQ = Math.max(
-          1,
-          Number(it.minQty || 1)
-        );
+        const minQ = Math.max(1, Number(it.minQty || 1));
         if (
           Number(it.qty || 0) > 0 &&
           Number(it.qty || 0) < minQ
@@ -238,18 +242,15 @@ export default function CartModal({ onClose }) {
         }
       }
 
-      // ✅ 「全體上限」檢查：只看 soldCount + 這次要買的數量
+      // 全體上限檢查：soldCount + 這次要買的數量
       for (const it of finalItems) {
-        const capacity = Number(
-          it.stockCapacity || 0
-        );
+        const capacity = Number(it.stockCapacity || 0);
         const want = Math.max(
           0,
           Number(it.qty || 0)
         );
         if (!capacity || !want) continue;
 
-        // 只看已售出總數（不再理會各自購物車）
         const soldSnap = await get(
           ref(db, `stock/${it.id}/soldCount`)
         );
@@ -282,7 +283,7 @@ export default function CartModal({ onClose }) {
         realName = String(snap.val() || "");
       } catch {}
 
-      // 通過所有檢查後，才真正把 soldCount 加上這次訂單的數量
+      // 實際將 soldCount 加上本次訂單的數量
       for (const it of finalItems) {
         const want = Math.max(
           0,
@@ -302,7 +303,6 @@ export default function CartModal({ onClose }) {
         qty: Number(it.qty) || 0,
       }));
 
-      // 用 pricing.js 產出折扣明細
       const breakdown = calcPriceBreakdown(
         orderItems,
         DISCOUNT
@@ -319,10 +319,10 @@ export default function CartModal({ onClose }) {
         },
         items: orderItems,
 
-        // 相容舊欄位：total = 未折扣小計
+        // 舊欄位相容
         total: breakdown.subtotal,
 
-        // 新欄位（折扣與折後總額）
+        // 新欄位
         subtotal: breakdown.subtotal,
         discount: breakdown.discount,
         totalAfterDiscount: breakdown.totalAfterDiscount,
@@ -342,7 +342,7 @@ export default function CartModal({ onClose }) {
         );
       } catch {}
 
-      // 清空購物車
+      // 清空購物袋
       if (auth.currentUser) {
         await set(
           ref(db, `carts/${auth.currentUser.uid}`),
@@ -360,7 +360,7 @@ export default function CartModal({ onClose }) {
     }
   };
 
-  // 登入成功 → 自動送單（保留）
+  // 登入成功 → 自動送單
   useEffect(() => {
     const onOk = (e) => {
       if (e?.detail?.next === "checkout")
@@ -368,10 +368,7 @@ export default function CartModal({ onClose }) {
     };
     window.addEventListener("login-success", onOk);
     return () =>
-      window.removeEventListener(
-        "login-success",
-        onOk
-      );
+      window.removeEventListener("login-success", onOk);
   }, [enriched, subtotal, uid, roleName, avatar, placing, isAnonymous]);
 
   return (
@@ -466,7 +463,7 @@ export default function CartModal({ onClose }) {
                   style={{
                     textAlign: "center",
                     padding: 8,
-                    width: 140,
+                    width: 160,
                   }}
                 >
                   數量
@@ -510,6 +507,23 @@ export default function CartModal({ onClose }) {
                   const sub =
                     (Number(it.price) || 0) *
                     (Number(it.qty) || 0);
+
+                  // 剩餘可訂購（只看 soldCount）
+                  const stockNode = stock[it.id] || {};
+                  const sold = Number(
+                    stockNode.soldCount || 0
+                  );
+                  const capacity = Number(
+                    it.stockCapacity || 0
+                  );
+                  const remaining =
+                    capacity > 0
+                      ? Math.max(0, capacity - sold)
+                      : null;
+                  const overLimit =
+                    remaining != null &&
+                    Number(it.qty || 0) > remaining;
+
                   return (
                     <tr
                       key={`${it.stallId}|${it.id}`}
@@ -540,69 +554,108 @@ export default function CartModal({ onClose }) {
                       >
                         <div
                           style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: 8,
+                            display:
+                              "inline-flex",
+                            flexDirection:
+                              "column",
+                            alignItems:
+                              "center",
+                            gap: 4,
                           }}
                         >
-                          <button
-                            type="button"
-                            onClick={() =>
-                              changeQty(
-                                it.stallId,
-                                it.id,
-                                -1
-                              )
-                            }
-                            className="small-btn"
-                          >
-                            −
-                          </button>
-                          <input
-                            value={Number(it.qty) || 0}
-                            onChange={(e) =>
-                              changeQty(
-                                it.stallId,
-                                it.id,
-                                e.target.value
-                              )
-                            }
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                            step={1}
-                            min={0}
+                          <div
                             style={{
-                              width: 56,
-                              textAlign: "center",
-                              border:
-                                "1px solid #ddd",
-                              borderRadius: 8,
-                              padding:
-                                "6px 4px",
+                              display:
+                                "inline-flex",
+                              alignItems:
+                                "center",
+                              gap: 8,
                             }}
-                          />
-                          <button
-                            type="button"
-                            onClick={() =>
-                              changeQty(
-                                it.stallId,
-                                it.id,
-                                +1
-                              )
-                            }
-                            className="small-btn"
                           >
-                            ＋
-                          </button>
-                        </div>
-                        <div
-                          style={{
-                            fontSize: 11,
-                            color: "#64748b",
-                            marginTop: 2,
-                          }}
-                        >
-                          至少 {it.minQty}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                changeQty(
+                                  it.stallId,
+                                  it.id,
+                                  -1
+                                )
+                              }
+                              className="small-btn"
+                            >
+                              −
+                            </button>
+                            <input
+                              value={
+                                Number(
+                                  it.qty
+                                ) || 0
+                              }
+                              onChange={(e) =>
+                                changeQty(
+                                  it.stallId,
+                                  it.id,
+                                  e.target
+                                    .value
+                                )
+                              }
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              step={1}
+                              min={0}
+                              style={{
+                                width: 56,
+                                textAlign:
+                                  "center",
+                                border:
+                                  "1px solid #ddd",
+                                borderRadius: 8,
+                                padding:
+                                  "6px 4px",
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                changeQty(
+                                  it.stallId,
+                                  it.id,
+                                  +1
+                                )
+                              }
+                              className="small-btn"
+                            >
+                              ＋
+                            </button>
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 11,
+                              color:
+                                "#64748b",
+                            }}
+                          >
+                            至少 {it.minQty}
+                          </div>
+                          {capacity > 0 && (
+                            <div
+                              style={{
+                                fontSize: 11,
+                                color: overLimit
+                                  ? "#ef4444"
+                                  : "#16a34a",
+                              }}
+                            >
+                              剩餘可訂購：
+                              <b>
+                                {remaining}
+                              </b>
+                              {it.unit ||
+                                "份"}
+                              {overLimit &&
+                                "（請調整）"}
+                            </div>
+                          )}
                         </div>
                       </td>
                       <td
@@ -648,7 +701,7 @@ export default function CartModal({ onClose }) {
           </table>
         </div>
 
-        {/* 底部金額：小計 + 折扣 + 折後總額 */}
+        {/* 金額 & 折扣 */}
         <div
           style={{
             display: "flex",
@@ -707,6 +760,7 @@ export default function CartModal({ onClose }) {
           </div>
         </div>
 
+        {/* 底部按鈕 */}
         <div
           style={{
             display: "flex",

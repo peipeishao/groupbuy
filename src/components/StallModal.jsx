@@ -34,145 +34,20 @@ function useReviewStats(itemId) {
   return stats;
 }
 
-/**
- * 單一商品卡片（在這裡使用 useReviewStats，避免在 map 裡呼叫 hook）
- */
-function StallItemCard({ stallId, it, qty, setQty, addToCart, onOpenReview }) {
-  const stats = useReviewStats(it.id); // ✅ Hook 放在元件最外層
-  const price = Number(it.priceGroup ?? it.price ?? 0);
-  const minQty = Math.max(1, Number(it.minQty || 1));
-
-  return (
-    <div key={`stall-${stallId}-prod-${it.id}`} style={card}>
-      <div style={{ display: "flex", gap: 12 }}>
-        {it.imageUrl ? (
-          <img
-            src={it.imageUrl}
-            alt={it.name}
-            style={{
-              width: 100,
-              height: 100,
-              objectFit: "cover",
-              borderRadius: 10,
-            }}
-          />
-        ) : (
-          <div
-            style={{
-              width: 100,
-              height: 100,
-              borderRadius: 10,
-              background: "#f1f5f9",
-              display: "grid",
-              placeItems: "center",
-              color: "#94a3b8",
-            }}
-          >
-            無圖
-          </div>
-        )}
-
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 900 }}>{it.name}</div>
-
-          {it.desc ? (
-            <div
-              style={{
-                color: "#64748b",
-                fontSize: 12,
-                marginTop: 4,
-              }}
-            >
-              {it.desc}
-            </div>
-          ) : null}
-
-          {/* 價格 */}
-          <div style={{ marginTop: 6, fontWeight: 800 }}>
-            團購價：{ntd1(price)} {it.unit ? `／${it.unit}` : ""}
-            {it.priceOriginal ? (
-              <span
-                style={{
-                  color: "#94a3b8",
-                  marginLeft: 8,
-                  textDecoration: "line-through",
-                }}
-              >
-                原價 {ntd1(it.priceOriginal)}
-              </span>
-            ) : null}
-          </div>
-
-          {/* ⭐ 評論摘要 */}
-          <div
-            style={{
-              marginTop: 6,
-              fontSize: 12,
-              color: "#475569",
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-              flexWrap: "wrap",
-            }}
-          >
-            <span title={`平均 ${stats.avg.toFixed(1)} 星`}>
-              {"★".repeat(Math.round(stats.avg || 0)) || "☆"}
-              <span style={{ color: "#94a3b8", marginLeft: 4 }}>
-                （{stats.count} 則評論）
-              </span>
-            </span>
-            <button
-              onClick={() => onOpenReview({ id: it.id, name: it.name })}
-              style={linkBtn}
-            >
-              查看 / 撰寫評論
-            </button>
-          </div>
-
-          <div style={{ fontSize: 11, color: "#64748b" }}>
-            至少 {minQty}
-          </div>
-
-          {/* 數量 + 加入購物袋 */}
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              alignItems: "center",
-              marginTop: 8,
-            }}
-          >
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={qty[it.id] || 0}
-              onChange={(e) =>
-                setQty((m) => ({
-                  ...m,
-                  [it.id]: Math.max(
-                    0,
-                    Math.floor(Number(e.target.value || 0))
-                  ),
-                }))
-              }
-              style={qtyInput}
-            />
-            <button onClick={() => addToCart(it)} style={addBtn}>
-              加入購物袋
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function StallModal({ open, stallId, onClose }) {
   const { uid, isAnonymous, openLoginGate } = usePlayer();
   const [items, setItems] = useState([]);
   const [qty, setQty] = useState({});
   const [reviewItem, setReviewItem] = useState(null); // {id,name}
+
+  // 讀取 /stock（只用 soldCount，remaining = stockCapacity - soldCount）
+  const [stock, setStock] = useState({});
+  useEffect(() => {
+    const off = onValue(dbRef(db, "stock"), (snap) => {
+      setStock(snap.val() || {});
+    });
+    return () => off();
+  }, []);
 
   // 讀商品：從 /products 讀，依 stallId（或相容舊欄位 category）篩選
   useEffect(() => {
@@ -181,7 +56,9 @@ export default function StallModal({ open, stallId, onClose }) {
       const v = snap.val() || {};
       const list = Object.entries(v)
         .map(([id, it]) => ({ id, ...(it || {}) }))
-        .filter((p) => String(p.stallId || p.category) === String(stallId));
+        .filter(
+          (p) => String(p.stallId || p.category) === String(stallId)
+        );
       list.sort((a, b) => (a.sort || 0) - (b.sort || 0));
       setItems(list);
     });
@@ -204,7 +81,7 @@ export default function StallModal({ open, stallId, onClose }) {
     const raw = Number(qty[it.id] || 0);
     if (!raw) return;
 
-    // 🔧 自動補到最低下單量
+    // 自動補到最低下單量
     const minQ = Math.max(1, Number(it.minQty || 1));
     const q = raw < minQ ? minQ : Math.floor(raw);
 
@@ -220,7 +97,7 @@ export default function StallModal({ open, stallId, onClose }) {
     });
     await update(dbRef(db, `carts/${uid}`), { updatedAt: Date.now() });
 
-    // 輸入框也同步顯示補後的數量
+    // 輸入框同步顯示補後數量
     setQty((m) => ({ ...m, [it.id]: q }));
   };
 
@@ -240,17 +117,161 @@ export default function StallModal({ open, stallId, onClose }) {
           {items.length === 0 ? (
             <div style={{ color: "#64748b" }}>目前這個攤位沒有上架商品</div>
           ) : (
-            items.map((it) => (
-              <StallItemCard
-                key={`stall-${stallId}-prod-${it.id}`}
-                stallId={stallId}
-                it={it}
-                qty={qty}
-                setQty={setQty}
-                addToCart={addToCart}
-                onOpenReview={setReviewItem}
-              />
-            ))
+            items.map((it) => {
+              const stats = useReviewStats(it.id);
+              const price = Number(it.priceGroup ?? it.price ?? 0);
+
+              // 剩餘可訂購數量（只看 soldCount）
+              const stockNode = stock[it.id] || {};
+              const sold = Number(stockNode.soldCount || 0);
+              const capacity = Number(it.stockCapacity || 0);
+              const remaining =
+                capacity > 0 ? Math.max(0, capacity - sold) : null;
+
+              return (
+                <div key={`stall-${stallId}-prod-${it.id}`} style={card}>
+                  <div style={{ display: "flex", gap: 12 }}>
+                    {it.imageUrl ? (
+                      <img
+                        src={it.imageUrl}
+                        alt={it.name}
+                        style={{
+                          width: 100,
+                          height: 100,
+                          objectFit: "cover",
+                          borderRadius: 10,
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          width: 100,
+                          height: 100,
+                          borderRadius: 10,
+                          background: "#f1f5f9",
+                          display: "grid",
+                          placeItems: "center",
+                          color: "#94a3b8",
+                        }}
+                      >
+                        無圖
+                      </div>
+                    )}
+
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 900 }}>{it.name}</div>
+
+                      {it.desc ? (
+                        <div
+                          style={{
+                            color: "#64748b",
+                            fontSize: 12,
+                            marginTop: 4,
+                          }}
+                        >
+                          {it.desc}
+                        </div>
+                      ) : null}
+
+                      {/* 價格 */}
+                      <div style={{ marginTop: 6, fontWeight: 800 }}>
+                        團購價：{ntd1(price)} {it.unit ? `／${it.unit}` : ""}
+                        {it.priceOriginal ? (
+                          <span
+                            style={{
+                              color: "#94a3b8",
+                              marginLeft: 8,
+                              textDecoration: "line-through",
+                            }}
+                          >
+                            原價 {ntd1(it.priceOriginal)}
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {/* 評論摘要 */}
+                      <div
+                        style={{
+                          marginTop: 6,
+                          fontSize: 12,
+                          color: "#475569",
+                        }}
+                      >
+                        <span title={`平均 ${stats.avg.toFixed(1)} 星`}>
+                          {"★".repeat(Math.round(stats.avg || 0)) || "☆"}
+                          <span style={{ color: "#94a3b8", marginLeft: 4 }}>
+                            （{stats.count} 則評論）
+                          </span>
+                        </span>
+                        <button
+                          onClick={() =>
+                            setReviewItem({ id: it.id, name: it.name })
+                          }
+                          style={linkBtn}
+                        >
+                          查看 / 撰寫評論
+                        </button>
+                      </div>
+
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "#64748b",
+                          marginTop: 2,
+                        }}
+                      >
+                        最低下單 {Math.max(1, Number(it.minQty || 1))}
+                      </div>
+
+                      {/* 剩餘可訂購數量（只看 soldCount） */}
+                      {capacity > 0 && (
+                        <div
+                          style={{
+                            fontSize: 11,
+                            color: remaining > 0 ? "#16a34a" : "#ef4444",
+                            marginTop: 2,
+                          }}
+                        >
+                          目前剩餘可訂購：
+                          <b>{remaining}</b>
+                          {it.unit || "份"}
+                        </div>
+                      )}
+
+                      {/* 數量 + 加入購物袋 */}
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 8,
+                          alignItems: "center",
+                          marginTop: 8,
+                        }}
+                      >
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={qty[it.id] || 0}
+                          onChange={(e) =>
+                            setQty((m) => ({
+                              ...m,
+                              [it.id]: Math.max(
+                                0,
+                                Math.floor(Number(e.target.value || 0))
+                              ),
+                            }))
+                          }
+                          style={qtyInput}
+                        />
+                        <button onClick={() => addToCart(it)} style={addBtn}>
+                          加入購物袋
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
           )}
 
           {/* 小計 */}
