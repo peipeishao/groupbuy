@@ -168,6 +168,14 @@ export default function MarketTown() {
       yPct: 12.0,
       widthRel: 0.14,
     },
+    // ⭐ 新增團購商家木牌
+    {
+      id: "newVendor",
+      label: "新商家名稱", // 之後你改成實際名稱
+      xPct: 30.0,          // 想要放在地圖哪裡，就調整 xPct / yPct
+      yPct: 20.0,
+      widthRel: 0.12,
+    },
   ];
 
   useEffect(() => {
