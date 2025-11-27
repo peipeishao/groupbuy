@@ -79,7 +79,7 @@ const styles = {
   },
   card: {
     width: "min(1050px, 96vw)",
-    maxHeight: "60vh", // 避免展開太高
+    maxHeight: "90vh", // 避免展開太高
     borderRadius: 14,
     border: "1px solid #eee",
     boxShadow: "0 18px 36px rgba(0,0,0,.2)",
@@ -157,23 +157,23 @@ export default function MarketTown() {
     {
       id: "chicken",
       label: "金豐盛雞胸肉",
-      xPct: 47.0,
-      yPct: 12.0,
-      widthRel: 0.1,
+      xPct: 52.0,
+      yPct: 10.0,
+      widthRel: 0.12,
     },
     {
       id: "cannele",
       label: "C文可麗露",
-      xPct: 65.0,
-      yPct: 12.0,
-      widthRel: 0.14,
+      xPct: 72.0,
+      yPct: 10.0,
+      widthRel: 0.12,
     },
     // ⭐ 新增團購商家木牌
     {
-      id: "newVendor",
-      label: "新商家名稱", // 之後你改成實際名稱
-      xPct: 30.0,          // 想要放在地圖哪裡，就調整 xPct / yPct
-      yPct: 20.0,
+      id: "newvendor",
+      label: "大成雞胸肉", // 之後你改成實際名稱
+      xPct: 31.0,          // 想要放在地圖哪裡，就調整 xPct / yPct
+      yPct: 10.0,
       widthRel: 0.12,
     },
   ];
@@ -271,8 +271,22 @@ export default function MarketTown() {
       <div style={{ height: "100px" }}></div>
 
       <FullBleedStage bg={BG_URL} baseWidth={1920} baseHeight={1080}>
+         {/* 攤位狀態牌：大成 */}
+        <Pin xPct={31} yPct={22} widthRel={0.1}>
+          <div style={{ position: "relative", zIndex: 20, width: "100%" }}>
+            <StallStatusSign
+              stallId="newvendor"
+              hideTitle
+              rowGap={4}
+              rowPaddingY={6}
+              labelWidth={88}
+              sectionGap={2}
+              style={{ width: "100%" }}
+            />
+          </div>
+        </Pin>
         {/* 攤位狀態牌：金豐盛 */}
-        <Pin xPct={47} yPct={24} widthRel={0.1}>
+        <Pin xPct={52} yPct={22} widthRel={0.1}>
           <div style={{ position: "relative", zIndex: 20, width: "100%" }}>
             <StallStatusSign
               stallId="chicken"
@@ -287,7 +301,7 @@ export default function MarketTown() {
         </Pin>
 
         {/* 攤位狀態牌：可麗露 */}
-        <Pin xPct={65} yPct={24} widthRel={0.1}>
+        <Pin xPct={72} yPct={22} widthRel={0.1}>
           <div style={{ position: "relative", zIndex: 20, width: "100%" }}>
             <StallStatusSign
               stallId="cannele"
@@ -359,7 +373,7 @@ export default function MarketTown() {
             borderRadius: 999,
             border: "2px solid #97311ee0",
             background: "#ffcaa4ff",
-            color: "#fff",
+            color: "#3a0101ff",
             fontWeight: 800,
             fontSize: 14,
             letterSpacing: "0.04em",

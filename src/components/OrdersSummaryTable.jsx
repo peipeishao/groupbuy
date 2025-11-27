@@ -79,39 +79,79 @@ export default function OrdersSummaryTable({ fixedWidth = "min(1200px, 96vw)", f
     return list;
   }, [products]);
 
-  // 依攤位彙總：本次開團攤位 + 每個品項剩餘（只看 soldCount）
-  const stallSummaries = useMemo(() => {
-    const groups = {};
+     const stallSummaries = useMemo(() => {
+  const groups = {};
+  const now = Date.now();
 
-    for (const p of flatProducts) {
-      const capacity = Number(p.stockCapacity || 0);
-      if (!capacity) continue; // 沒設定上限就略過
+  // 解析 timestamp：自動辨識 秒/毫秒/字串/日期字串
+  const parseTs = (v) => {
+    if (v === null || v === undefined || v === "") return null;
 
-      const itemId = String(p.id);
-      const sold = Number(stock?.[itemId]?.soldCount || 0);
-      const remaining = Math.max(0, capacity - sold);
-
-      const stallId = String(p.stallId || p.category || "未指定攤位");
-      if (!groups[stallId]) {
-        const stallNode = stalls && stalls[stallId];
-        const title = (stallNode && (stallNode.title || stallNode.name)) || stallId;
-        groups[stallId] = {
-          stallId,
-          stallTitle: title,
-          items: [],
-        };
-      }
-      groups[stallId].items.push({
-        id: itemId,
-        name: p.name || `商品 ${itemId}`,
-        remaining,
-      });
+    if (typeof v === "number") {
+      // 秒 -> 毫秒
+      if (v > 0 && v < 1e12) return v * 1000;
+      return v; // 毫秒
     }
 
-    return Object.values(groups).sort((a, b) =>
-      String(a.stallTitle || a.stallId).localeCompare(String(b.stallTitle || b.stallId), "zh-Hant-TW")
-    );
-  }, [flatProducts, stock, stalls]);
+    if (typeof v === "string") {
+      const num = Number(v);
+      if (!isNaN(num)) {
+        if (num > 0 && num < 1e12) return num * 1000;
+        if (num >= 1e12) return num;
+      }
+      const d = new Date(v);
+      if (!isNaN(d.getTime())) return d.getTime();
+    }
+
+    return null;
+  };
+
+  for (const p of flatProducts) {
+    const capacity = Number(p.stockCapacity || 0);
+    if (!capacity) continue;
+
+    const stallId = String(p.stallId || p.category || "未指定攤位");
+    const stallNode = stalls?.[stallId];
+
+    // ⭐ 依你的資料結構抓 campaign.startAt / campaign.closeAt
+    const rawStart = stallNode?.campaign?.startAt ?? null;
+    const rawEnd   = stallNode?.campaign?.closeAt ?? null;
+
+    const startTs = parseTs(rawStart);
+    const endTs   = parseTs(rawEnd);
+
+    // 開團未開始 → 不顯示
+    if (startTs !== null && now < startTs) continue;
+
+    // 已過收單時間 → 不顯示（可麗露就是這個）
+    if (endTs !== null && now > endTs) continue;
+
+    const itemId = String(p.id);
+    const sold = Number(stock?.[itemId]?.soldCount || 0);
+    const remaining = Math.max(0, capacity - sold);
+
+    if (!groups[stallId]) {
+      const title = stallNode?.title || stallNode?.name || stallId;
+      groups[stallId] = {
+        stallId,
+        stallTitle: title,
+        items: [],
+      };
+    }
+
+    groups[stallId].items.push({
+      id: itemId,
+      name: p.name || `商品 ${itemId}`,
+      remaining,
+    });
+  }
+
+  return Object.values(groups).sort((a, b) =>
+    String(a.stallTitle).localeCompare(String(b.stallTitle), "zh-Hant-TW")
+  );
+}, [flatProducts, stock, stalls]);
+
+
 
   useEffect(() => {
     let detachOrders = null;

@@ -728,36 +728,7 @@ export default function CartModal({ onClose }) {
             padding: "0 16px 0",
           }}
         >
-          <div style={{ textAlign: "right" }}>
-            <div
-              style={{
-                fontSize: 12,
-                color: "#64748b",
-              }}
-            >
-              {DISCOUNT_LABEL}
-            </div>
-            <div
-              style={{
-                marginTop: 2,
-                color: "#16a34a",
-                fontWeight: 800,
-              }}
-            >
-              活動折扣　- {ntd1(discountAmt)}
-            </div>
-            <div
-              style={{
-                marginTop: 2,
-                color: "#111",
-                fontWeight: 900,
-              }}
-            >
-              折扣後總額　{ntd1(
-                totalAfterDiscount
-              )}
-            </div>
-          </div>
+          
         </div>
 
         {/* 底部按鈕 */}

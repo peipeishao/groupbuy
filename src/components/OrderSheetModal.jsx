@@ -26,10 +26,7 @@ function useStallCampaign(stallId) {
     const off = onValue(ref(db, `stalls/${stallId}/campaign`), (snap) =>
       setCamp(snap.val() || null)
     );
-    const t = setInterval(
-      () => setTick((x) => (x + 1) % 1e9),
-      1000
-    );
+    const t = setInterval(() => setTick((x) => (x + 1) % 1e9), 1000);
     return () => {
       off && off();
       clearInterval(t);
@@ -51,11 +48,40 @@ function useStallCampaign(stallId) {
     const m = Math.floor((s % 3600) / 60);
     const sec = s % 60;
     return h > 0
-      ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
+      ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(
+          2,
+          "0"
+        )}`
       : `${m}:${String(sec).padStart(2, "0")}`;
   })();
 
   return { upcoming, ended, cdText };
+}
+
+/** 攤位基本資訊：標題 / 圖片 / 說明文字 */
+function useStallMeta(stallId) {
+  const [meta, setMeta] = useState(null);
+
+  useEffect(() => {
+    if (!stallId) {
+      setMeta(null);
+      return;
+    }
+    const r = ref(db, `stalls/${stallId}`);
+    const off = onValue(r, (snap) => {
+      const v = snap.val() || {};
+      setMeta({
+        title: String(v.title || stallId),
+        bannerUrl: String(v.bannerUrl || ""),
+        heroUrl: String(v.heroUrl || ""),
+        intro: String(v.intro || ""),
+        rules: String(v.rules || ""),
+      });
+    });
+    return () => off();
+  }, [stallId]);
+
+  return meta;
 }
 
 function CountdownBadgeInline({ upcoming, ended, cdText }) {
@@ -120,12 +146,22 @@ function ProductCard({
   onInc,
   onInput,
   onOpenReview,
+  groupInfo, // 👈 成團進度資訊（可選）
 }) {
   const stats = useReviewStats(p.id);
   const remainingText =
     remaining != null
       ? `剩餘可訂購：${remaining}${p.unit || "份"}`
       : null;
+
+  // 60 包成團進度條（只在有 groupInfo 時顯示）
+  const hasGroup = groupInfo && groupInfo.target > 0;
+  const sold = hasGroup ? Number(groupInfo.sold || 0) : 0;
+  const target = hasGroup ? Number(groupInfo.target || 0) : 0;
+  const remain = hasGroup ? Math.max(0, Number(groupInfo.remain || 0)) : 0;
+  const ratio = hasGroup && target > 0 ? Math.max(0, Math.min(1, sold / target)) : 0;
+  const percent = Math.round(ratio * 100);
+  const reached = hasGroup && remain <= 0;
 
   return (
     <div
@@ -210,6 +246,60 @@ function ProductCard({
         </div>
       )}
 
+      {/* ⭐ 成團進度條：只在有 groupInfo 的時候顯示 */}
+      {hasGroup && (
+        <div
+          style={{
+            marginBottom: 4,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              fontSize: 11,
+              marginBottom: 2,
+              color: "#0f172a",
+            }}
+          >
+            <span>成團進度（需滿 {target} 包）</span>
+            <span>
+              {sold} / {target} 包
+            </span>
+          </div>
+          <div
+            style={{
+              height: 6,
+              borderRadius: 999,
+              background: "#e5e7eb",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                width: `${percent}%`,
+                height: "100%",
+                borderRadius: 999,
+                background: reached ? "#16a34a" : "#f97316",
+                transition: "width .2s ease",
+              }}
+            />
+          </div>
+          <div
+            style={{
+              marginTop: 2,
+              fontSize: 11,
+              color: reached ? "#15803d" : "#0f766e",
+              fontWeight: reached ? 700 : 400,
+            }}
+          >
+            {reached
+              ? "✅ 已達成成團門檻，歡迎加購～"
+              : `還差 ${remain} 包就成團！`}
+          </div>
+        </div>
+      )}
+
       <div
         style={{
           display: "flex",
@@ -266,6 +356,7 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
   const { openLoginGate } = usePlayer();
   const { items: cartAll = [], reload } = useCart();
   const { upcoming, ended, cdText } = useStallCampaign(stallId);
+  const stallMeta = useStallMeta(stallId);
 
   const [available, setAvailable] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -396,7 +487,8 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
                   it.active &&
                   it.price > 0 &&
                   (!stallId ||
-                    String(it.stallId || it.category) === String(stallId))
+                    String(it.stallId || it.category) ===
+                      String(stallId))
               )
               .sort(
                 (a, b) =>
@@ -404,7 +496,9 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
                   String(a.name).localeCompare(String(b.name))
               );
             setAvailable(
-              filtered.map(({ active, createdAt, category, ...it }) => it)
+              filtered.map(
+                ({ active, createdAt, category, ...it }) => it
+              )
             );
             setSourceLabel("products");
           } else {
@@ -569,6 +663,13 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
 
   if (!open) return null;
 
+  const showStallHero =
+    stallMeta &&
+    (stallMeta.bannerUrl ||
+      stallMeta.heroUrl ||
+      stallMeta.intro ||
+      stallMeta.rules);
+
   return (
     <div
       onClick={onClose}
@@ -608,7 +709,7 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
           }}
         >
           <h3 style={{ margin: 0 }}>
-            攤位：{stallId || "全部"}　|　購物清單
+            攤位：{stallMeta?.title || stallId || "全部"}　|　購物清單
           </h3>
           <CountdownBadgeInline
             upcoming={upcoming}
@@ -619,6 +720,90 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
 
         {/* 可滾動內容 */}
         <div style={{ overflow: "auto", minHeight: 0 }}>
+          {/* 攤位圖片 / 介紹 */}
+          {showStallHero && (
+            <section
+              style={{
+                padding: 14,
+                borderBottom: "1px solid #f0f0f0",
+              }}
+            >
+              {stallMeta?.bannerUrl && (
+                <div
+                  style={{
+                    borderRadius: 12,
+                    overflow: "hidden",
+                    marginBottom: 10,
+                    maxHeight: 160,
+                    background: "#e5e7eb",
+                  }}
+                >
+                  <img
+                    src={stallMeta.bannerUrl}
+                    alt={stallMeta.title}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      display: "block",
+                    }}
+                  />
+                </div>
+              )}
+              {stallMeta?.heroUrl && (
+                <div
+                  style={{
+                    borderRadius: 12,
+                    overflow: "hidden",
+                    marginBottom: 10,
+                    maxHeight: 200,
+                    background: "#e5e7eb",
+                  }}
+                >
+                  <img
+                    src={stallMeta.heroUrl}
+                    alt={`${stallMeta.title} 主圖`}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      display: "block",
+                    }}
+                  />
+                </div>
+              )}
+              {(stallMeta?.intro || stallMeta?.rules) && (
+                <div
+                  style={{
+                    fontSize: 13,
+                    color: "#475569",
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {stallMeta.intro && (
+                    <div
+                      style={{
+                        marginBottom: stallMeta.rules ? 4 : 0,
+                      }}
+                    >
+                      {stallMeta.intro}
+                    </div>
+                  )}
+                  {stallMeta.rules && (
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "#b91c1c",
+                      }}
+                    >
+                      {stallMeta.rules}
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
+
           {/* 可選商品 */}
           <section
             style={{
@@ -642,7 +827,11 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
                   gap: 8,
                 }}
               >
-                <div style={{ fontWeight: 800 }}>
+                <div
+                  style={{
+                    fontWeight: 800,
+                  }}
+                >
                   可選商品
                 </div>
                 {sourceLabel && (
@@ -710,12 +899,31 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
                       ? Math.max(0, capacity - sold)
                       : null;
 
+                  // ⭐ 只對 newvendor 攤位顯示「同口味 60 包成團」進度
+                  let groupInfo = null;
+                  if (
+                    String(stallId) === "newvendor" ||
+                    String(stallId) === "newVendor"
+                  ) {
+                    const target = 60;
+                    const remainToTarget = Math.max(
+                      0,
+                      target - sold
+                    );
+                    groupInfo = {
+                      target,
+                      sold,
+                      remain: remainToTarget,
+                    };
+                  }
+
                   return (
                     <ProductCard
                       key={p.id}
                       p={p}
                       q={q}
                       remaining={remaining}
+                      groupInfo={groupInfo}
                       onDec={() =>
                         setSel((s) => ({
                           ...s,
@@ -769,9 +977,7 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
             >
               <thead style={{ background: "#fafafa" }}>
                 <tr>
-                  <th style={{ textAlign: "left", padding: 8 }}>
-                    品項
-                  </th>
+                  <th style={{ textAlign: "left", padding: 8 }}>品項</th>
                   <th
                     style={{
                       textAlign: "right",
@@ -818,8 +1024,7 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
                 ) : (
                   stallCart.map((it, i) => {
                     const sub =
-                      Number(it.price || 0) *
-                      Number(it.qty || 0);
+                      Number(it.price || 0) * Number(it.qty || 0);
                     return (
                       <tr key={i}>
                         <td style={{ padding: 8 }}>{it.name}</td>
@@ -854,40 +1059,42 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
               </tbody>
             </table>
 
-            {/* 折扣列（僅顯示，不寫 DB） */}
-            <div
-              style={{
-                textAlign: "right",
-                marginTop: 8,
-              }}
-            >
+            {/* 折扣列：只有折扣金額 > 0 才顯示，避免你現在沒有活動還顯示文字 */}
+            {discountAmt > 0 && (
               <div
                 style={{
-                  fontSize: 12,
-                  color: "#64748b",
+                  textAlign: "right",
+                  marginTop: 8,
                 }}
               >
-                {DISCOUNT_LABEL}
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "#64748b",
+                  }}
+                >
+                  {DISCOUNT_LABEL}
+                </div>
+                <div
+                  style={{
+                    marginTop: 2,
+                    color: "#16a34a",
+                    fontWeight: 800,
+                  }}
+                >
+                  活動折扣　- {ntd1(discountAmt)}
+                </div>
+                <div
+                  style={{
+                    marginTop: 2,
+                    color: "#111",
+                    fontWeight: 900,
+                  }}
+                >
+                  折扣後總額　{ntd1(totalAfterDiscount)}
+                </div>
               </div>
-              <div
-                style={{
-                  marginTop: 2,
-                  color: "#16a34a",
-                  fontWeight: 800,
-                }}
-              >
-                活動折扣　- {ntd1(discountAmt)}
-              </div>
-              <div
-                style={{
-                  marginTop: 2,
-                  color: "#111",
-                  fontWeight: 900,
-                }}
-              >
-                折扣後總額　{ntd1(totalAfterDiscount)}
-              </div>
-            </div>
+            )}
           </section>
         </div>
 
@@ -918,10 +1125,7 @@ export default function OrderSheetModal({ open, stallId, onClose }) {
             <div>
               折後：<b>{ntd1(totalAfterDiscount)}</b>
             </div>
-            <button
-              onClick={addSelectedToCart}
-              style={primaryBtn}
-            >
+            <button onClick={addSelectedToCart} style={primaryBtn}>
               加入購物袋
             </button>
           </div>

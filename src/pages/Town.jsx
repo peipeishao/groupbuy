@@ -34,7 +34,9 @@ export default function Town() {
     () => localStorage.getItem(LS_RIGHT_COLLAPSE) === "1"
   );
 
-  useEffect(() => { uidRef.current = uid; }, [uid]);
+  useEffect(() => {
+    uidRef.current = uid;
+  }, [uid]);
 
   // 走道遮罩（可無）
   useEffect(() => {
@@ -42,7 +44,8 @@ export default function Town() {
     img.src = "/walkable-mask.png";
     img.onload = () => {
       const cvs = document.createElement("canvas");
-      cvs.width = img.width; cvs.height = img.height;
+      cvs.width = img.width;
+      cvs.height = img.height;
       const ctx = cvs.getContext("2d", { willReadFrequently: true });
       ctx.drawImage(img, 0, 0);
       ctxRef.current = ctx;
@@ -82,8 +85,12 @@ export default function Town() {
     });
 
     return () => {
-      try { offPlayers(); } catch {}
-      try { unsubAuth(); } catch {}
+      try {
+        offPlayers();
+      } catch {}
+      try {
+        unsubAuth();
+      } catch {}
     };
   }, []);
 
@@ -91,24 +98,28 @@ export default function Town() {
   useEffect(() => {
     const isTyping = () => {
       const el = document.activeElement;
-      const t = el?.tagName?.toLowerCase();
+      const t = String(el?.tagName || "").toLowerCase(); // ✅ 安全轉小寫
       return t === "input" || t === "textarea" || el?.isContentEditable;
     };
-    const moveKeys = ["w","a","s","d","arrowup","arrowleft","arrowdown","arrowright"];
+    const moveKeys = ["w", "a", "s", "d", "arrowup", "arrowleft", "arrowdown", "arrowright"];
+
     const kd = (e) => {
-      const k = e.key.toLowerCase();
+      const k = String(e?.key || "").toLowerCase(); // ✅ 安全轉小寫
       if (!moveKeys.includes(k) || isTyping()) return;
       e.preventDefault();
       keysRef.current[k] = true;
     };
     const ku = (e) => {
-      const k = e.key.toLowerCase();
+      const k = String(e?.key || "").toLowerCase(); // ✅ 安全轉小寫
       if (!moveKeys.includes(k) || isTyping()) return;
       keysRef.current[k] = false;
     };
+
     window.addEventListener("keydown", kd, { passive: false });
     window.addEventListener("keyup", ku);
-    const blur = () => { keysRef.current = {}; };
+    const blur = () => {
+      keysRef.current = {};
+    };
     window.addEventListener("blur", blur);
     return () => {
       window.removeEventListener("keydown", kd);
@@ -150,7 +161,9 @@ export default function Town() {
     try {
       await update(dbRef(db, `playersPublic/${u.uid}`), { x: nx, y: ny, dir, updatedAt: Date.now() });
       lastSentRef.current = { x: nx, y: ny, dir };
-    } catch (e) { console.warn("[updatePosition] failed", e); }
+    } catch (e) {
+      console.warn("[updatePosition] failed", e);
+    }
   }, []);
 
   // 主迴圈（匿名/登入都可移動）
@@ -162,22 +175,40 @@ export default function Town() {
         let { x, y, dir } = myPosRef.current;
 
         const k = keysRef.current;
-        let nx = x, ny = y, ndir = dir;
+        let nx = x,
+          ny = y,
+          ndir = dir;
 
-        if (k.w || k.arrowup)   { ny -= SPEED; ndir = "up"; }
-        if (k.s || k.arrowdown) { ny += SPEED; ndir = "down"; }
-        if (k.a || k.arrowleft) { nx -= SPEED; ndir = "left"; }
-        if (k.d || k.arrowright){ nx += SPEED; ndir = "right"; }
+        if (k.w || k.arrowup) {
+          ny -= SPEED;
+          ndir = "up";
+        }
+        if (k.s || k.arrowdown) {
+          ny += SPEED;
+          ndir = "down";
+        }
+        if (k.a || k.arrowleft) {
+          nx -= SPEED;
+          ndir = "left";
+        }
+        if (k.d || k.arrowright) {
+          nx += SPEED;
+          ndir = "right";
+        }
 
         nx = Math.max(MIN_XY, Math.min(MAX_XY, nx));
         ny = Math.max(MIN_XY, Math.min(MAX_XY, ny));
 
         if (maskReady) {
-          if ((nx !== x) && isWalkable(nx, y)) x = nx;
-          if ((ny !== y) && isWalkable(x, ny)) y = ny;
-        } else { x = nx; y = ny; }
+          if (nx !== x && isWalkable(nx, y)) x = nx;
+          if (ny !== y && isWalkable(x, ny)) y = ny;
+        } else {
+          x = nx;
+          y = ny;
+        }
 
-        const changed = (x !== myPosRef.current.x) || (y !== myPosRef.current.y) || (ndir !== myPosRef.current.dir);
+        const changed =
+          x !== myPosRef.current.x || y !== myPosRef.current.y || ndir !== myPosRef.current.dir;
         if (changed) {
           myPosRef.current = { x, y, dir: ndir };
           sendMyPosition(x, y, ndir);
@@ -201,7 +232,7 @@ export default function Town() {
       const mine = {
         ...me,
         uid,
-        roleName: (me.roleName ?? profile?.roleName ?? "旅人"),
+        roleName: me.roleName ?? profile?.roleName ?? "旅人",
         avatar: me.avatar ?? profile?.avatar ?? "bunny",
         // ✅ 自訂頭像網址（若 RTDB 還沒同步，用 profile 補上）
         avatarUrl: me.avatarUrl ?? profile?.avatarUrl ?? null,
@@ -211,8 +242,9 @@ export default function Town() {
         // 🔵 自己的燈號以 RTDB 連線狀態為準
         online: isConnected ? true : !!me.online,
       };
-      const idx = out.findIndex(([id]) => id === uid);
-      if (idx >= 0) out[idx][1] = mine; else out.push([uid, mine]);
+      const idx = out.findIndex(([id2]) => id2 === uid);
+      if (idx >= 0) out[idx][1] = mine;
+      else out.push([uid, mine]);
     }
     return out;
   }, [players, uid, profile, isConnected]);
@@ -227,8 +259,10 @@ export default function Town() {
     }));
     arr.sort((a, b) => {
       if (a.online !== b.online) return a.online ? -1 : 1;
-      const an = a.roleName.toLowerCase(), bn = b.roleName.toLowerCase();
-      if (an < bn) return -1; if (an > bn) return 1;
+      const an = String(a.roleName || "").toLowerCase(); // ✅ 安全轉小寫
+      const bn = String(b.roleName || "").toLowerCase(); // ✅ 安全轉小寫
+      if (an < bn) return -1;
+      if (an > bn) return 1;
       return a.id < b.id ? -1 : 1;
     });
     return arr;
@@ -251,7 +285,7 @@ export default function Town() {
             }}
             title={p.online ? "上線中" : "離線"}
           >
-            {(p.bubble?.text && (Date.now() - (Number(p.bubble?.ts)||0) <= BUBBLE_MS)) && (
+            {p.bubble?.text && Date.now() - (Number(p.bubble?.ts) || 0) <= BUBBLE_MS && (
               <div
                 style={{
                   transform: "translateY(-44px)",
@@ -272,24 +306,26 @@ export default function Town() {
             )}
             <div
               style={{
-                width: 40, height: 40, borderRadius: 12, background: "#fff",
+                width: 40,
+                height: 40,
+                borderRadius: 12,
+                background: "#fff",
                 border: id === uid ? "3px solid #1d4ed8" : "1px solid #eee",
                 boxShadow: id === uid ? "0 0 0 3px rgba(29,78,216,.15)" : "none",
-                display: "grid", placeItems: "center",
+                display: "grid",
+                placeItems: "center",
                 overflow: "hidden", // ✅ 讓自訂頭像裁邊
               }}
             >
               {/* ✅ 地圖上的頭像：有自訂圖就顯示圖片，否則顯示預設 emoji */}
-              {(p.avatar === "custom" && p.avatarUrl) ? (
+              {p.avatar === "custom" && p.avatarUrl ? (
                 <img
                   src={p.avatarUrl}
                   alt={p.roleName || ""}
                   style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 12 }}
                 />
               ) : (
-                <div style={{ fontSize: 24 }}>
-                  {AVATAR_EMOJI[p.avatar || "bunny"] || "🙂"}
-                </div>
+                <div style={{ fontSize: 24 }}>{AVATAR_EMOJI[p.avatar || "bunny"] || "🙂"}</div>
               )}
             </div>
             <div
@@ -307,40 +343,59 @@ export default function Town() {
                 aria-label={p.online ? "上線中" : "離線"}
                 title={p.online ? "上線中" : "離線"}
                 style={{
-                  width: 8, height: 8, borderRadius: 999,
+                  width: 8,
+                  height: 8,
+                  borderRadius: 999,
                   background: p.online ? "#10b981" : "#bdbdbd",
                   boxShadow: p.online ? "0 0 0 3px rgba(16,185,129,.18)" : "none",
                 }}
               />
-              <span>{p.roleName || "旅人"}{id === uid ? " (你)" : ""}</span>
+              <span>
+                {p.roleName || "旅人"}
+                {id === uid ? " (你)" : ""}
+              </span>
             </div>
           </div>
         ))}
       </div>
 
-    {/* 右側玩家清單（可收合） */}
-<div
-  style={{
-    position: "fixed",
-    top: 16, // 想更靠上/下，就改這個
-    right: rightCollapsed ? -272 : 16,
-    width: 256,
-    // ✅ 使用 100dvh + 預留底部 HUD 與安全區，避免和底部重疊
-    maxHeight: `calc(100dvh - 16px - max(12px, env(safe-area-inset-bottom)) - 140px)`,
-    overflow: "hidden", // ✅ 超出出現卷軸
-    background: "rgba(255,255,255,.95)",
-    border: "1px solid #eee",
-    borderRadius: 16,
-    boxShadow: "0 12px 28px rgba(0,0,0,.12)",
-    padding: 12,
-    zIndex: 90,
-    transition: "right .18s ease",
-  }}
->
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+      {/* 右側玩家清單（可收合） */}
+      <div
+        style={{
+          position: "fixed",
+          top: 16, // 想更靠上/下，就改這個
+          right: rightCollapsed ? -272 : 16,
+          width: 256,
+          // ✅ 使用 100dvh + 預留底部 HUD 與安全區，避免和底部重疊
+          maxHeight: `calc(100dvh - 16px - max(12px, env(safe-area-inset-bottom)) - 140px)`,
+          overflow: "hidden", // ✅ 超出出現卷軸
+          background: "rgba(255,255,255,.95)",
+          border: "1px solid #eee",
+          borderRadius: 16,
+          boxShadow: "0 12px 28px rgba(0,0,0,.12)",
+          padding: 12,
+          zIndex: 90,
+          transition: "right .18s ease",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 8,
+          }}
+        >
           <div style={{ fontWeight: 800 }}>小鎮人數（{roster.length}）</div>
           <div style={{ fontSize: 12, color: "#666" }}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, marginRight: 6 }}>
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                marginRight: 6,
+              }}
+            >
               <span style={{ width: 8, height: 8, borderRadius: 999, background: "#10b981" }} />
               上線
             </span>
@@ -352,28 +407,80 @@ export default function Town() {
         </div>
         <div style={{ overflow: "auto", maxHeight: "calc(100vh - 32px - 40px)" }}>
           {roster.map((p) => (
-            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 4px", borderBottom: "1px dashed #f0f0f0" }}>
-              <div style={{
-                width: 28, height: 28, borderRadius: 10, background: "#fff", border: "1px solid #eee",
-                display: "grid", placeItems: "center", overflow: "hidden" // ✅ 讓圖片裁切
-              }}>
+            <div
+              key={p.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "6px 4px",
+                borderBottom: "1px dashed #f0f0f0",
+              }}
+            >
+              <div
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 10,
+                  background: "#fff",
+                  border: "1px solid #eee",
+                  display: "grid",
+                  placeItems: "center",
+                  overflow: "hidden", // ✅ 讓圖片裁切
+                }}
+              >
                 {/* ✅ 右側列表的頭像：優先顯示自訂圖 */}
-                {(p.avatar === "custom" && p.avatarUrl) ? (
-                  <img src={p.avatarUrl} alt={p.roleName} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 10 }} />
+                {p.avatar === "custom" && p.avatarUrl ? (
+                  <img
+                    src={p.avatarUrl}
+                    alt={p.roleName}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                      borderRadius: 10,
+                    }}
+                  />
                 ) : (
                   <div style={{ fontSize: 18 }}>{AVATAR_EMOJI[p.avatar] || "🙂"}</div>
                 )}
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
-                <span aria-label={p.online ? "上線中" : "離線"} title={p.online ? "上線中" : "離線"} style={{ width: 8, height: 8, borderRadius: 999, background: p.online ? "#10b981" : "#bdbdbd" }} />
-                <div style={{ fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  flex: 1,
+                  minWidth: 0,
+                }}
+              >
+                <span
+                  aria-label={p.online ? "上線中" : "離線"}
+                  title={p.online ? "上線中" : "離線"}
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: 999,
+                    background: p.online ? "#10b981" : "#bdbdbd",
+                  }}
+                />
+                <div
+                  style={{
+                    fontWeight: 700,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
                   {p.roleName || "旅人"}
                 </div>
               </div>
             </div>
           ))}
           {roster.length === 0 && (
-            <div style={{ color: "#666", fontSize: 12, padding: 8 }}>目前沒有玩家。</div>
+            <div style={{ color: "#666", fontSize: 12, padding: 8 }}>
+              目前沒有玩家。
+            </div>
           )}
         </div>
       </div>
