@@ -137,19 +137,7 @@ export default function Town() {
     const pdir = String(players?.[uid]?.dir ?? profile?.dir ?? "down");
     myPosRef.current = { x: px, y: py, dir: pdir };
   }, [uid]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 伺服器同步到自己的節點時，初次/重連以伺服器為準
-  useEffect(() => {
-    if (!uid) return;
-    const me = players[uid];
-    if (!me) return;
-    myPosRef.current = {
-      x: Number(me.x ?? myPosRef.current.x ?? 400),
-      y: Number(me.y ?? myPosRef.current.y ?? 300),
-      dir: String(me.dir ?? myPosRef.current.dir ?? "down"),
-    };
-  }, [players, uid]);
-
+  
   // 寫回自己位置
   const sendMyPosition = useCallback(async (nx, ny, dir) => {
     const u = auth.currentUser;
@@ -165,6 +153,37 @@ export default function Town() {
       console.warn("[updatePosition] failed", e);
     }
   }, []);
+  // 🟦 自動脫困：如果玩家在不可走區，自動傳回安全地點
+useEffect(() => {
+  const safeSpawn = { x: 3800, y: 300 }; // 你原本的 SPAWN_BOX 中心點
+
+  const interval = setInterval(() => {
+    const { x, y } = myPosRef.current;
+    if (!maskReady) return;
+
+    if (!isWalkable(x, y)) {
+      console.warn("玩家卡住，已自動傳送回安全點");
+      myPosRef.current = { x: safeSpawn.x, y: safeSpawn.y, dir: "down" };
+      sendMyPosition(safeSpawn.x, safeSpawn.y, "down");
+    }
+  }, 1500);
+
+  return () => clearInterval(interval);
+}, [maskReady, sendMyPosition]);
+
+
+  // 伺服器同步到自己的節點時，初次/重連以伺服器為準
+  useEffect(() => {
+    if (!uid) return;
+    const me = players[uid];
+    if (!me) return;
+    myPosRef.current = {
+      x: Number(me.x ?? myPosRef.current.x ?? 400),
+      y: Number(me.y ?? myPosRef.current.y ?? 300),
+      dir: String(me.dir ?? myPosRef.current.dir ?? "down"),
+    };
+  }, [players, uid]);
+
 
   // 主迴圈（匿名/登入都可移動）
   useEffect(() => {
