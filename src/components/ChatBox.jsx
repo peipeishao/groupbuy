@@ -342,7 +342,7 @@ export default function ChatBox() {
                         const rootRect = root.getBoundingClientRect();
                         // 讓 emoji 視窗出現在按鈕的左下附近
                         setReactionPickerPos({
-                          top: rect.top - rootRect.top-8,
+                           top: rect.top - rootRect.top,
                           left:
                             rect.left -
                             rootRect.left +
@@ -531,7 +531,7 @@ export default function ChatBox() {
             position: "absolute",
             top: reactionPickerPos.top,
             left: reactionPickerPos.left,
-            transform: "translate(-20px, 0)", // 微調一下在按鈕左下
+            transform: "translate(-10px, -100%)",
             zIndex: 5000,
             background: "#ffffff",
             borderRadius: 8,
